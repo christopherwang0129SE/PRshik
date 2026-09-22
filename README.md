@@ -1,4 +1,4 @@
-# Nordvakt
+# MergeGuard
 
 **An agent-based system that minimises merge conflicts.**
 Built for the **Nebius & Tavily Hackathon 2026**.
@@ -68,6 +68,7 @@ frontend/           dashboard (to be scaffolded)
 docs/               customer discovery + notes
 ```
 
-## Why "Nordvakt"
+## Why "MergeGuard"
 
-Nordic *vakt* — "the watch." Something is always watching the branches.
+Something is always on guard at the merge point — watching every in-flight
+branch so a conflict never lands as a surprise.
