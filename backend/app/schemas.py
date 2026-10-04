@@ -64,3 +64,19 @@ class AnalyzeResponse(BaseModel):
     branches: list[str]
     diffs: list[BranchDiff]
     pairs: list[PairRisk]
+
+
+class GitHubPullRequest(BaseModel):
+    number: int
+    title: str
+    author: str
+    url: str
+    head_branch: str
+    base_branch: str
+    updated_at: str
+
+
+class GitHubPullRequestSyncResponse(BaseModel):
+    repository: str
+    pull_requests: list[GitHubPullRequest]
+    analysis: AnalyzeResponse
