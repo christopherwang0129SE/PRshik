@@ -7,6 +7,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from app.config import settings
+from app.schemas import AnalyzeRequest, AnalyzeResponse
+from app.services import git_service, sentinel, verifier
+
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
@@ -60,7 +63,16 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(400, f"No branches to analyze (base={base}).")
 
     try:
-        return sentinel.analyze(repo, base, branches, use_cache=req.use_cache)
+        return sentinel.analyze(
+            repo,
+            base,
+            branches,
+            use_cache=req.use_cache,
+            verify=req.verify,
+            # Generated tests only ever run on local repos under the allowed
+            # roots (default: the bundled demo/), never on URL clones.
+            verify_allowed=bool(req.repo_path) and verifier.repo_allowed(repo),
+        )
     except git_service.GitError as e:
         raise HTTPException(400, str(e)) from e
 
