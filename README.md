@@ -459,6 +459,20 @@ Measured on 2026-10-08, first call per repo without cache:
 | daimon real case | `list_conflicting_branches` / `suggest_merge_order` | 15.7 s each | 1 of 1 confirmed; merge #14 first, then rebase #17 (cached) | $0 |
 | guardrails | `/etc`, unknown branch | 0.0 s | `is_error` with a clear message | $0 |
 
+### Sync open GitHub pull requests
+
+Set `GITHUB_REPOSITORY` to `owner/repository` and `GITHUB_SEATED_USERS` to a
+comma-separated list of seated GitHub usernames in `backend/.env`. Set
+`GITHUB_TOKEN` for private repositories or higher API rate limits. The
+`GET /api/github/pull-requests` endpoint syncs open pull requests targeting
+`DEFAULT_BASE_BRANCH`, includes only authors in the seated-user list, fetches
+their GitHub PR refs into the local workspace clone, and returns the PR details
+alongside Sentinel's conflict-risk analysis against the latest fetched
+`origin/DEFAULT_BASE_BRANCH`. Scoring uses the same pipeline as `/api/analyze`
+(git heuristic, static prefilter, optional Nemotron). Generated intent tests
+and branch tests stay off for these URL clones. It does not assign reviewers
+or merge pull requests.
+
 ## Tests
 
 ```bash
@@ -476,9 +490,10 @@ backend/            FastAPI service
     main.py         entrypoint + CORS
     config.py       env-driven settings (Nebius/Tavily keys)
     schemas.py      API models
-    api/routes.py   /api/health (status, model, provider), /api/analyze
+    api/routes.py   /api/health (status, model, provider), /api/analyze, /api/github/pull-requests
     services/
-      git_service.py  pure-git diff/branch helpers (subprocess)
+      git_service.py  pure-git diff/branch helpers (subprocess), including PR ref fetch
+      github_service.py  open pull requests for seated authors (GitHub API)
       nemotron.py     Token Factory chat-completions client
       sentinel.py     conflict-risk scoring (git, optional Nemotron blend)
       prefilter.py    static symbol/call prefilter before any LLM call
