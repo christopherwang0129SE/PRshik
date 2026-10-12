@@ -1,6 +1,8 @@
 """Thin git wrapper (subprocess) — no external deps, works on any repo."""
 from __future__ import annotations
 
+import base64
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -14,31 +16,70 @@ class GitError(RuntimeError):
     pass
 
 
-def _run(repo: Path, *args: str) -> str:
+def _safe_git_error(message: str, token: str | None) -> str:
+    if token:
+        credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        message = message.replace(credential, "[redacted]").replace(token, "[redacted]")
+    return message
+
+
+def _git_env(token: str | None = None) -> dict[str, str] | None:
+    if not token:
+        return None
+    env = os.environ.copy()
+    try:
+        config_count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError as exc:
+        raise GitError("GIT_CONFIG_COUNT must be an integer") from exc
+    env["GIT_CONFIG_COUNT"] = str(config_count + 1)
+    env[f"GIT_CONFIG_KEY_{config_count}"] = "http.extraheader"
+    credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    env[f"GIT_CONFIG_VALUE_{config_count}"] = f"AUTHORIZATION: basic {credential}"
+    return env
+
+
+def _run(repo: Path, *args: str, token: str | None = None) -> str:
     proc = subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
+        env=_git_env(token),
     )
     if proc.returncode != 0:
-        raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+        error = _safe_git_error(proc.stderr.strip(), token)
+        raise GitError(f"git {' '.join(args)} failed: {error}")
     return proc.stdout
 
 
-def clone(repo_url: str, dest: Path) -> Path:
+def clone(repo_url: str, dest: Path, token: str | None = None) -> Path:
     if dest.exists():
         # Refresh existing clone.
-        _run(dest, "fetch", "--all", "--prune")
+        _run(dest, "fetch", "--all", "--prune", token=token)
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         ["git", "clone", "--no-single-branch", repo_url, str(dest)],
         capture_output=True,
         text=True,
+        env=_git_env(token),
     )
     if proc.returncode != 0:
-        raise GitError(f"clone failed: {proc.stderr.strip()}")
+        error = _safe_git_error(proc.stderr.strip(), token)
+        raise GitError(f"clone failed: {error}")
     return dest
+
+
+def fetch_pull_request(repo: Path, number: int, token: str | None = None) -> str:
+    branch = f"mergeguard/pr/{number}"
+    _run(
+        repo,
+        "fetch",
+        "--no-tags",
+        "origin",
+        f"+refs/pull/{number}/head:refs/heads/{branch}",
+        token=token,
+    )
+    return branch
 
 
 def list_branches(repo: Path, exclude: str | None = None) -> list[str]:
