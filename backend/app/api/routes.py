@@ -1,4 +1,4 @@
-"""HTTP routes for the Sentinel service."""
+"""HTTP routes for Sentinel analysis and resolver proposals."""
 from __future__ import annotations
 
 import hashlib
@@ -7,8 +7,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from app.config import settings
-from app.schemas import AnalyzeRequest, AnalyzeResponse
-from app.services import git_service, sentinel
+from app.schemas import AnalyzeRequest, AnalyzeResponse, ResolveRequest, ResolveResponse
+from app.services import git_service, resolver, sentinel
 
 router = APIRouter()
 
@@ -53,5 +53,13 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
     try:
         return sentinel.analyze(repo, base, branches)
+    except git_service.GitError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/resolve", response_model=ResolveResponse)
+def resolve(req: ResolveRequest) -> ResolveResponse:
+    try:
+        return resolver.resolve(req)
     except git_service.GitError as e:
         raise HTTPException(400, str(e)) from e
