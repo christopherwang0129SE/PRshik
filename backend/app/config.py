@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     # --- Tavily (used later by the Resolver for doc lookups) ---
     tavily_api_key: str = ""
 
+    # --- GitHub pull-request integration ---
+    github_repository: str = ""
+    github_token: str = ""
+    github_seated_users: str = ""
+
     # --- App ---
     default_base_branch: str = "main"
     # Where cloned demo repos are cached.
@@ -34,6 +39,14 @@ class Settings(BaseSettings):
     @property
     def tavily_ready(self) -> bool:
         return bool(self.tavily_api_key)
+
+    @property
+    def seated_github_users(self) -> set[str]:
+        return {
+            username.strip().lower()
+            for username in self.github_seated_users.split(",")
+            if username.strip()
+        }
 
 
 settings = Settings()

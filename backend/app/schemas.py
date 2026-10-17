@@ -101,3 +101,19 @@ class ResolveResponse(BaseModel):
     validations: list[ValidationResult]
     research_sources: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class GitHubPullRequest(BaseModel):
+    number: int
+    title: str
+    author: str
+    url: str
+    head_branch: str
+    base_branch: str
+    updated_at: str
+
+
+class GitHubPullRequestSyncResponse(BaseModel):
+    repository: str
+    pull_requests: list[GitHubPullRequest]
+    analysis: AnalyzeResponse

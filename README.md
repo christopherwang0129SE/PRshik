@@ -42,6 +42,18 @@ curl -s -X POST http://localhost:8000/api/analyze \
 Returns a per-branch diff summary and a ranked list of branch-pair **conflict-risk
 scores** with human-readable rationales.
 
+### Sync open GitHub pull requests
+
+Set `GITHUB_REPOSITORY` to `owner/repository` and `GITHUB_SEATED_USERS` to a
+comma-separated list of seated GitHub usernames in `backend/.env`. Set
+`GITHUB_TOKEN` for private repositories or higher API rate limits. The
+`GET /api/github/pull-requests` endpoint syncs open pull requests targeting
+`DEFAULT_BASE_BRANCH`, includes only authors in the seated-user list, fetches
+their GitHub PR refs into the local workspace clone, and returns the PR details
+alongside Sentinel's conflict-risk analysis against the latest fetched
+`origin/DEFAULT_BASE_BRANCH`. It does not assign reviewers or merge pull
+requests.
+
 ## Tests
 
 ```bash
