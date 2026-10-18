@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from pydantic import ValidationError
@@ -143,13 +144,23 @@ def _get_list(client: httpx.Client, url: str) -> list:
         page += 1
 
 
+def _parse_time(value: str) -> datetime:
+    """Parse a GitHub timestamp such as 2026-10-16T09:00:00Z."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise GitHubError("GitHub returned an invalid timestamp") from exc
+
+
 def list_review_queue(
     repository: str,
     seated_users: set[str],
     base_branch: str,
     review_sla_hours: int,
     token: str | None = None,
+    now: datetime | None = None,
 ) -> list[GitHubReviewQueueItem]:
+    now = now or datetime.now(timezone.utc)
     pulls = list_open_pull_requests(repository, seated_users, base_branch, token)
 
     headers = {
@@ -209,6 +220,30 @@ def list_review_queue(
                     if login in seated_users and login != author and login in requested_at
                 ]
                 waiting_since = min(pending) if pending else None
+
+                # Step 4: pick the status, most decisive first, and add the item.
+                if approved_by:
+                    status = "approved"
+                elif not reviewers:
+                    status = "needs_reviewer"
+                elif waiting_since and now - _parse_time(waiting_since) > timedelta(
+                    hours=review_sla_hours
+                ):
+                    status = "review_late"
+                else:
+                    status = "awaiting_review"
+                items.append(
+                    GitHubReviewQueueItem(
+                        number=pull.number,
+                        title=pull.title,
+                        author=pull.author,
+                        url=pull.url,
+                        status=status,
+                        reviewers=reviewers,
+                        approved_by=approved_by,
+                        waiting_since=waiting_since,
+                    )
+                )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         raise GitHubError(f"GitHub API returned HTTP {status}") from exc
