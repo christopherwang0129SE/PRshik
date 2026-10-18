@@ -74,9 +74,27 @@ class GitHubPullRequest(BaseModel):
     head_branch: str
     base_branch: str
     updated_at: str
+    requested_reviewers: list[str] = Field(default_factory=list)
 
 
 class GitHubPullRequestSyncResponse(BaseModel):
     repository: str
     pull_requests: list[GitHubPullRequest]
     analysis: AnalyzeResponse
+
+
+class GitHubReviewQueueItem(BaseModel):
+    number: int
+    title: str
+    author: str
+    url: str
+    status: Literal["needs_reviewer", "awaiting_review", "review_late", "approved"]
+    reviewers: list[str]
+    approved_by: list[str]
+    waiting_since: str | None = None
+
+
+class GitHubReviewQueueResponse(BaseModel):
+    repository: str
+    review_sla_hours: int
+    items: list[GitHubReviewQueueItem]

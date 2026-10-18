@@ -6,7 +6,7 @@ import re
 import httpx
 from pydantic import ValidationError
 
-from app.schemas import GitHubPullRequest
+from app.schemas import GitHubPullRequest, GitHubReviewQueueItem
 
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _API_URL = "https://api.github.com"
@@ -88,6 +88,14 @@ def list_open_pull_requests(
                         raise GitHubError("GitHub returned invalid pull-request fields")
                     if login.lower() not in seated_users or base_ref != base_branch:
                         continue
+                    requested = pull.get("requested_reviewers") or []
+                    if not isinstance(requested, list):
+                        raise GitHubError("GitHub returned invalid requested reviewers")
+                    requested_logins = [
+                        reviewer["login"]
+                        for reviewer in requested
+                        if isinstance(reviewer, dict) and isinstance(reviewer.get("login"), str)
+                    ]
                     try:
                         pulls.append(
                             GitHubPullRequest(
@@ -98,6 +106,7 @@ def list_open_pull_requests(
                                 head_branch=head_ref,
                                 base_branch=base_ref,
                                 updated_at=pull["updated_at"],
+                                requested_reviewers=requested_logins,
                             )
                         )
                     except (KeyError, ValidationError) as exc:
@@ -113,3 +122,97 @@ def list_open_pull_requests(
         raise GitHubError(f"Could not reach the GitHub API: {exc}") from exc
 
     return pulls
+
+
+def _get_list(client: httpx.Client, url: str) -> list:
+    """GET every page of a GitHub list endpoint."""
+    results: list = []
+    page = 1
+    while True:
+        response = client.get(url, params={"per_page": 100, "page": page})
+        response.raise_for_status()
+        try:
+            page_items = response.json()
+        except ValueError as exc:
+            raise GitHubError("GitHub returned invalid JSON") from exc
+        if not isinstance(page_items, list):
+            raise GitHubError("GitHub returned an invalid list response")
+        results.extend(page_items)
+        if len(page_items) < 100:
+            return results
+        page += 1
+
+
+def list_review_queue(
+    repository: str,
+    seated_users: set[str],
+    base_branch: str,
+    review_sla_hours: int,
+    token: str | None = None,
+) -> list[GitHubReviewQueueItem]:
+    pulls = list_open_pull_requests(repository, seated_users, base_branch, token)
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    items: list[GitHubReviewQueueItem] = []
+    try:
+        with httpx.Client(timeout=15.0, headers=headers) as client:
+            for pull in pulls:
+                # Step 1: each person's latest review decides whether they approved.
+                reviews = _get_list(
+                    client, f"{_API_URL}/repos/{repository}/pulls/{pull.number}/reviews"
+                )
+                latest: dict[str, str] = {}
+                for review in reviews:
+                    user = review.get("user") if isinstance(review, dict) else None
+                    login = user.get("login") if isinstance(user, dict) else None
+                    state = review.get("state") if isinstance(review, dict) else None
+                    if isinstance(login, str) and isinstance(state, str):
+                        latest[login.lower()] = state
+
+                author = pull.author.lower()
+                approved_by = sorted(
+                    login
+                    for login, state in latest.items()
+                    if state == "APPROVED" and login in seated_users and login != author
+                )
+
+                # Step 2: reviewers are everyone still requested plus everyone who reviewed.
+                requested = {login.lower() for login in pull.requested_reviewers}
+                reviewers = sorted(
+                    login
+                    for login in requested | latest.keys()
+                    if login in seated_users and login != author
+                )
+
+                # Step 3: the clock starts when a still-pending reviewer was last requested.
+                events = _get_list(
+                    client, f"{_API_URL}/repos/{repository}/issues/{pull.number}/timeline"
+                )
+                requested_at: dict[str, str] = {}
+                for event in events:
+                    if not isinstance(event, dict) or event.get("event") != "review_requested":
+                        continue
+                    reviewer = event.get("requested_reviewer")
+                    login = reviewer.get("login") if isinstance(reviewer, dict) else None
+                    created_at = event.get("created_at")
+                    if isinstance(login, str) and isinstance(created_at, str):
+                        requested_at[login.lower()] = created_at
+                pending = [
+                    requested_at[login]
+                    for login in requested
+                    if login in seated_users and login != author and login in requested_at
+                ]
+                waiting_since = min(pending) if pending else None
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        raise GitHubError(f"GitHub API returned HTTP {status}") from exc
+    except httpx.RequestError as exc:
+        raise GitHubError(f"Could not reach the GitHub API: {exc}") from exc
+
+    return items

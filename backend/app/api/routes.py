@@ -11,6 +11,7 @@ from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     GitHubPullRequestSyncResponse,
+    GitHubReviewQueueResponse,
 )
 from app.services import git_service, github_service, sentinel
 
@@ -103,4 +104,33 @@ def sync_github_pull_requests() -> GitHubPullRequestSyncResponse:
         repository=repository,
         pull_requests=pull_requests,
         analysis=analysis,
+    )
+
+
+@router.get("/github/queue", response_model=GitHubReviewQueueResponse)
+def github_review_queue() -> GitHubReviewQueueResponse:
+    repository = settings.github_repository.strip()
+    if not repository:
+        raise HTTPException(503, "GITHUB_REPOSITORY is not configured")
+    if not settings.seated_github_users:
+        raise HTTPException(503, "GITHUB_SEATED_USERS is not configured")
+    try:
+        repository = github_service.validate_repository(repository)
+    except github_service.GitHubError as e:
+        raise HTTPException(503, str(e)) from e
+    try:
+        items = github_service.list_review_queue(
+            repository=repository,
+            seated_users=settings.seated_github_users,
+            base_branch=settings.default_base_branch,
+            review_sla_hours=settings.github_review_sla_hours,
+            token=settings.github_token or None,
+        )
+    except github_service.GitHubError as e:
+        raise HTTPException(502, str(e)) from e
+
+    return GitHubReviewQueueResponse(
+        repository=repository,
+        review_sla_hours=settings.github_review_sla_hours,
+        items=items,
     )
