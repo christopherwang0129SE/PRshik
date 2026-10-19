@@ -1,4 +1,5 @@
 import type { BranchTestRun, BranchTests } from '../types';
+import { ProofStrip } from './ProofStrip';
 
 interface BranchTestDetailsProps {
   branchTests: BranchTests;
@@ -6,12 +7,12 @@ interface BranchTestDetailsProps {
 
 const BADGE: Record<BranchTests['status'], { label: string; className: string }> = {
   confirmed: {
-    label: 'Confirmed by branch test (existing tests, no LLM)',
+    label: 'Confirmed by branch test',
     className: 'badge badge-confirmed badge-branch-test',
   },
-  passed: { label: 'Branch tests pass on merge', className: 'badge badge-source' },
-  skipped: { label: 'Branch tests skipped', className: 'badge badge-source' },
-  unsupported: { label: 'Branch tests unsupported', className: 'badge badge-source' },
+  passed: { label: 'Branch tests pass on merge', className: 'badge badge-neutral' },
+  skipped: { label: 'Branch tests skipped', className: 'badge badge-neutral' },
+  unsupported: { label: 'Branch tests unsupported', className: 'badge badge-neutral' },
   error: { label: 'Branch tests error', className: 'badge badge-suspected' },
 };
 
@@ -43,28 +44,41 @@ const runSummary = (run: BranchTestRun): string => {
  */
 export const BranchTestDetails = ({ branchTests }: BranchTestDetailsProps) => {
   const badge = BADGE[branchTests.status];
+  const confirmed = branchTests.status === 'confirmed';
   return (
-    <div className="verification branch-tests" data-testid="branch-tests">
-      <span className={badge.className} title={branchTests.reason}>
-        {badge.label}
-      </span>
-      <div className="verification-reason">{branchTests.reason}</div>
+    <section className="evidence" data-status={branchTests.status} data-testid="branch-tests">
+      <div className="evidence-head">
+        <h4>The branches&apos; own tests</h4>
+        <span className={badge.className}>{badge.label}</span>
+      </div>
+      <p className="evidence-what">
+        Test files each branch changed, run on its branch and on the merge. No LLM involved.
+      </p>
+      {!confirmed && <p className="evidence-reason">{branchTests.reason}</p>}
+      {confirmed && <ProofStrip runs={branchTests.runs} />}
       {branchTests.confirming.length > 0 && (
-        <ul className="verification-confirming" aria-label="Branch tests failing on merge">
+        <ul className="failing-tests" aria-label="Branch tests failing on merge">
           {branchTests.confirming.map((failure) => (
             <li key={failure.test_id}>
-              <code>{failure.test_id}</code> ({failure.branch}&apos;s test)
-              {failure.excerpt ? `: ${failure.excerpt}` : ''}
+              <code className="test-id">{failure.test_id}</code>
+              <span className="failing-meta">
+                {failure.branch}&apos;s test
+                {failure.excerpt ? (
+                  <>
+                    {': '}
+                    <code className="excerpt">{failure.excerpt}</code>
+                  </>
+                ) : null}
+              </span>
             </li>
           ))}
         </ul>
       )}
       {branchTests.runs.length > 0 && (
-        <details className="verification-details">
-          <summary>
-            Branch test runs ({branchTests.duration_s.toFixed(1)}s)
-          </summary>
-          <ul className="verification-runs">
+        <details className="disclosure">
+          <summary>Branch test runs ({branchTests.duration_s.toFixed(1)}s)</summary>
+          {confirmed && <p className="evidence-reason">{branchTests.reason}</p>}
+          <ul className="run-list">
             {branchTests.runs.map((run, index) => (
               <li key={`${run.target}-${run.runner ?? 'pytest'}-${run.package ?? ''}-${index}`}>
                 <strong>{TARGET_LABEL[run.target]}</strong> ({run.ref}
@@ -77,19 +91,17 @@ export const BranchTestDetails = ({ branchTests }: BranchTestDetailsProps) => {
             ))}
           </ul>
           {(branchTests.setup?.length ?? 0) > 0 && (
-            <div className="verification-sandbox" data-testid="branch-test-setup">
+            <p className="run-note" data-testid="branch-test-setup">
               JS setup
               {(branchTests.install_s ?? 0) > 0 || (branchTests.build_s ?? 0) > 0
                 ? ` (install ${(branchTests.install_s ?? 0).toFixed(1)}s, builds ${(branchTests.build_s ?? 0).toFixed(1)}s)`
                 : ''}
               : {branchTests.setup?.join('; ')}
-            </div>
+            </p>
           )}
-          {branchTests.sandbox && (
-            <div className="verification-sandbox">Sandbox: {branchTests.sandbox}</div>
-          )}
+          {branchTests.sandbox && <p className="run-note">Sandbox: {branchTests.sandbox}</p>}
         </details>
       )}
-    </div>
+    </section>
   );
 };

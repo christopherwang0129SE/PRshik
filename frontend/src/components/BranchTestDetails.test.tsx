@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { BranchTestDetails } from './BranchTestDetails'
-import { PairTable } from './PairTable'
+import { PairList } from './PairList'
 import { usageLine } from '../utils/usage'
 import { isConfirmedByBranchTest, isConfirmedByIntentTest, isConfirmedByTest } from '../utils/risk'
 import type { BranchTests, PairRisk, UsageSummary } from '../types'
@@ -48,7 +48,7 @@ const pair = (extra: Partial<PairRisk> = {}): PairRisk => ({
 describe('BranchTestDetails', () => {
   it('labels a branch-test confirmation separately from the intent test', () => {
     render(<BranchTestDetails branchTests={branchTests()} />)
-    const badge = screen.getByText('Confirmed by branch test (existing tests, no LLM)')
+    const badge = screen.getByText('Confirmed by branch test')
     expect(badge).toHaveClass('badge-confirmed')
     expect(screen.queryByText(/intent test/)).toBeNull()
   })
@@ -57,7 +57,7 @@ describe('BranchTestDetails', () => {
     render(<BranchTestDetails branchTests={branchTests()} />)
     expect(screen.getByText('tests.test_report::test_report_uses_floor')).toBeInTheDocument()
     expect(screen.getByLabelText('Branch tests failing on merge')).toHaveTextContent(
-      "feat/report's test): E AttributeError: 'tuple' object has no attribute 'get'"
+      "feat/report's test: E AttributeError: 'tuple' object has no attribute 'get'"
     )
   })
 
@@ -100,21 +100,24 @@ describe('BranchTestDetails', () => {
 
   it('gives a branch-test-only pair the confirmed row edge', () => {
     const { container } = render(
-      <PairTable pairs={[pair({ branch_tests: branchTests() })]} risk_model={null} />
+      <PairList pairs={[pair({ branch_tests: branchTests() })]} risk_model={null} />
     )
     expect(screen.getAllByTestId('branch-tests')).toHaveLength(1)
     expect(screen.queryByTestId('verification')).toBeNull()
-    expect(container.querySelector('tbody tr')!.classList.contains('row-confirmed')).toBe(true)
+    expect(container.querySelector('[data-testid="pair-card"]')!.classList.contains('pair-confirmed')).toBe(true)
   })
 
   it('does not give the confirmed edge for passed branch tests', () => {
     const { container } = render(
-      <PairTable
+      <PairList
         pairs={[pair({ score: 20, level: 'low', branch_tests: branchTests({ status: 'passed', confirming: [] }) })]}
         risk_model={null}
       />
     )
-    expect(container.querySelector('tbody tr')!.classList.contains('row-confirmed')).toBe(false)
+    expect(container.querySelector('.pair-confirmed')).toBeNull()
+    // A tested low-risk pair stays a quiet row; its evidence sits in the details.
+    expect(screen.getByTestId('quiet-row')).toBeInTheDocument()
+    expect(screen.getByText('Branch tests pass on merge')).toBeInTheDocument()
   })
 
   it('tells the two confirmation layers apart', () => {
