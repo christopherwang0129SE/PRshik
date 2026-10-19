@@ -109,7 +109,7 @@ describe('VerificationDetails', () => {
       />
     )
     expect(screen.getByTestId('pair-score')).toHaveTextContent('90/100, High')
-    expect(screen.getByTestId('score-note')).toHaveTextContent('raised: confirmed by test (blend 48)')
+    expect(screen.getByTestId('score-note')).toHaveTextContent('Raised from 48: confirmed by test')
     // Git and model columns stay as reported.
     expect(screen.getByTestId('git-score')).toHaveTextContent('10')
     expect(screen.getByTestId('model-score')).toHaveTextContent('85')

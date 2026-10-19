@@ -5,7 +5,6 @@ import {
   isHiddenConflict,
   effectivePairLevel,
   isConfirmedByTest,
-  isConfirmedByBranchTest,
 } from '../utils/risk';
 import type { PairRisk, RiskLevel, UsageSummary } from '../types';
 import { formatCost } from '../utils/usage';
@@ -42,7 +41,6 @@ const countsLine = (pairs: PairRisk[]): string => {
   const worst = worstLevel(pairs);
   const hidden = pairs.filter((pair) => isHiddenConflict(pair)).length;
   const confirmed = pairs.filter((pair) => isConfirmedByTest(pair)).length;
-  const byBranchTest = pairs.filter((pair) => isConfirmedByBranchTest(pair)).length;
   const risky = pairs.filter((pair) => levelRank(effectivePairLevel(pair)) >= levelRank('medium')).length;
   const atWorst = pairs.filter((pair) => effectivePairLevel(pair) === worst).length;
 
@@ -51,8 +49,7 @@ const countsLine = (pairs: PairRisk[]): string => {
     // Only hidden conflicts, nothing published medium/high.
     return `${hidden} hidden conflict${hidden === 1 ? '' : 's'} among ${total} pairs`;
   }
-  const branchPart = byBranchTest > 0 ? ` (${byBranchTest} by branch test)` : '';
-  const confirmedPart = confirmed > 0 ? `, ${confirmed} confirmed by test${branchPart}` : '';
+  const confirmedPart = confirmed > 0 ? `, ${confirmed} confirmed by test` : '';
   const hiddenPart = hidden > 0 ? `, ${hidden} hidden` : '';
   return `${atWorst} of ${total} branch pairs at ${levelToText(worst).toLowerCase()} risk${confirmedPart}${hiddenPart}`;
 };
@@ -65,7 +62,7 @@ const agreementLine = (pairs: PairRisk[]): string => {
     return 'No pair needed Nemotron: static prefilter found no overlap';
   }
   if (modelUsed === 0) return 'Git only: Nemotron unavailable';
-  if (disagree > 0) return `Nemotron disagrees on ${disagree} pair(s)`;
+  if (disagree > 0) return `Nemotron disagrees with git on ${disagree} pair${disagree === 1 ? '' : 's'}`;
   return 'Nemotron agrees with git on all pairs';
 };
 
@@ -143,18 +140,17 @@ export const SummaryBar = ({ pairs, usage, headingRef, branches, facts, riskMode
             <dd>{facts[2]}</dd>
           </div>
         )}
-        {usage && (
-          <div>
-            <dt>Usage</dt>
-            <dd data-testid="summary-usage">
-              <Usage usage={usage} />
+        {(usage || riskModel) && (
+          <div className="kv-run">
+            <dt>Run</dt>
+            <dd>
+              {riskModel && <span className="mono">{riskModel}</span>}
+              {usage && (
+                <span data-testid="summary-usage">
+                  <Usage usage={usage} />
+                </span>
+              )}
             </dd>
-          </div>
-        )}
-        {riskModel && (
-          <div>
-            <dt>Model</dt>
-            <dd className="mono">{riskModel}</dd>
           </div>
         )}
       </dl>

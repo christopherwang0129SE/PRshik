@@ -73,7 +73,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(
-      screen.getByText('Nemotron disagrees on 1 pair(s)')
+      screen.getByText('Nemotron disagrees with git on 1 pair')
     ).toBeInTheDocument()
   })
 
@@ -125,7 +125,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(
-      screen.getByText('Nemotron disagrees on 1 pair(s)')
+      screen.getByText('Nemotron disagrees with git on 1 pair')
     ).toBeInTheDocument()
   })
 
@@ -357,7 +357,7 @@ describe('SummaryBar confirmed by test', () => {
     })
     render(<SummaryBar pairs={[branchOnly, docs('feat/tuple')]} />)
     expect(
-      screen.getByText('1 of 2 branch pairs at high risk, 1 confirmed by test (1 by branch test)')
+      screen.getByText('1 of 2 branch pairs at high risk, 1 confirmed by test')
     ).toBeInTheDocument()
   })
 

@@ -19,7 +19,7 @@ describe('AgentStatus', () => {
     expect(screen.getByText(/git only/i)).toBeInTheDocument();
   });
 
-  it('shows Sentinel online with git+Nemotron mode and the model id when Nebius is ready', () => {
+  it('shows Sentinel online with git+Nemotron mode when Nebius is ready, without repeating the model id', () => {
     render(
       <AgentStatus
         health={health({ nebius_ready: true, nebius_enabled: true, nebius_model: 'nemotron' })}
@@ -27,7 +27,7 @@ describe('AgentStatus', () => {
     );
     expect(screen.getByText(/online/i)).toBeInTheDocument();
     expect(screen.getByText(/git\+Nemotron/i)).toBeInTheDocument();
-    expect(screen.getByText('nemotron')).toBeInTheDocument();
+    expect(screen.queryByText('nemotron')).toBeNull();
   });
 
   it('shows Sentinel offline when health is unavailable', () => {

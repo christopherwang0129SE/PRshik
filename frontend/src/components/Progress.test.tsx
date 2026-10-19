@@ -12,9 +12,10 @@ describe('Progress', () => {
     expect(region.querySelector('.progress-elapsed')).toHaveTextContent('7s elapsed');
   });
 
-  it('shows the running stage text and marks each step for screen readers', () => {
+  it('names the stage once, in the step list, and marks each step for screen readers', () => {
     render(<Progress target="r" baseBranch="main" activeStep={1} elapsedS={9} />);
-    expect(screen.getByText(STEPS[1].running)).toBeInTheDocument();
+    // The running sentence goes to the app's live region, not a second visible line.
+    expect(screen.queryByText(STEPS[1].running)).toBeNull();
     const items = within(screen.getByRole('list')).getAllByRole('listitem');
     expect(items.map((li) => li.getAttribute('data-state'))).toEqual(['done', 'active', 'todo']);
     expect(items[0]).toHaveTextContent('Diff branches: done');

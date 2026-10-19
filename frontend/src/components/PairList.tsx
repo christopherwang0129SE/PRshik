@@ -44,6 +44,18 @@ const statusOf = (pair: PairRisk): { label: string; tone: 'fail' | 'warn' | 'neu
   return { label: `${levelToText(effectivePairLevel(pair))} risk`, tone: 'neutral' };
 };
 
+/** "raised: confirmed by test" plus blend 48 -> "Raised from 48: confirmed by test". */
+const scoreNote = (pair: PairRisk): string => {
+  const note = pair.score_note ?? '';
+  const blend = pair.blended_score;
+  const match = /^(raised|lowered):\s*(.*)$/i.exec(note);
+  if (match && blend !== null && blend !== undefined) {
+    const verb = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+    return `${verb} from ${Math.round(blend)}: ${match[2]}`;
+  }
+  return note;
+};
+
 const Branches = ({ pair }: { pair: PairRisk }) => (
   <>
     <span className="branch">{pair.branch_a}</span>{' '}
@@ -66,6 +78,8 @@ const Score = ({ pair }: { pair: PairRisk }) => (
 const Why = ({ pair }: { pair: PairRisk }) => {
   const floor = isFloorRule(pair);
   const hidden = isHiddenConflict(pair);
+  // A test already proved the conflict; the model's flag would repeat it.
+  const proven = isConfirmedByTest(pair);
   const [modelLine, floorLine] = floor ? floorRationale(pair) : ['', ''];
   return (
     <section className="fact">
@@ -86,11 +100,13 @@ const Why = ({ pair }: { pair: PairRisk }) => {
           </>
         ) : hidden ? (
           <>
-            <p>
-              <span className="status" data-tone="warn">
-                Nemotron flags hidden conflict
-              </span>
-            </p>
+            {!proven && (
+              <p>
+                <span className="status" data-tone="warn">
+                  Nemotron flags hidden conflict
+                </span>
+              </p>
+            )}
             <p>{pair.model_rationale ?? pair.rationale}</p>
           </>
         ) : (
@@ -220,7 +236,7 @@ const Scores = ({ pair }: { pair: PairRisk }) => {
             </div>
           )}
         </dl>
-        {pair.git_rationale && pair.score_source === 'model' && (
+        {pair.git_rationale && pair.score_source === 'model' && !isConfirmedByTest(pair) && (
           <p className="muted">Git heuristic: {pair.git_rationale}</p>
         )}
       </div>
@@ -267,10 +283,7 @@ const PairArticle = ({ pair }: { pair: PairRisk }) => {
           </span>
           {pair.score_note && (
             <span className="muted" data-testid="score-note">
-              {pair.score_note}
-              {pair.blended_score !== null && pair.blended_score !== undefined
-                ? ` (blend ${Math.round(pair.blended_score)})`
-                : ''}
+              {scoreNote(pair)}
             </span>
           )}
         </p>

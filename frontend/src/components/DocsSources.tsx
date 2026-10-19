@@ -29,14 +29,21 @@ export const DocsSources = ({ sources }: DocsSourcesProps) => {
                 </p>
               )}
               <ul className="docs-links">
-                {group.sources.map((source) => {
+                {group.sources.map((source, index) => {
                   const host = hostOf(source.url);
+                  // Name the host once per run of links from the same site.
+                  const sameHost = index > 0 && hostOf(group.sources[index - 1].url) === host;
                   return (
                     <li key={source.url}>
                       <a href={source.url} target="_blank" rel="noopener noreferrer">
                         {source.title || host}
-                      </a>{' '}
-                      <span className="docs-host">{host}</span>
+                      </a>
+                      {!sameHost && (
+                        <>
+                          {' '}
+                          <span className="docs-host">{host}</span>
+                        </>
+                      )}
                     </li>
                   );
                 })}

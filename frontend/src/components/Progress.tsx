@@ -28,7 +28,6 @@ export const Progress = ({ target, baseBranch, activeStep, elapsedS }: ProgressP
     <p className="progress-target">
       <code>{target}</code> against <code>{baseBranch}</code>
     </p>
-    <p className="progress-stage">{STEPS[activeStep].running}</p>
     <ol className="progress-steps">
       {STEPS.map((step, index) => {
         const state: StepState = index < activeStep ? 'done' : index === activeStep ? 'active' : 'todo';

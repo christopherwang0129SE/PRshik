@@ -141,6 +141,8 @@ function App() {
   const backendOffline = healthChecked && !health;
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
   const hasDemo = Boolean(DEMO_REPO_PATH || API_DEMO_REPO_PATH);
+  // Once a run exists the outcome leads: the intake drops its explanations.
+  const compact = loading || Boolean(response) || Boolean(error);
 
   return (
     <div className="app">
@@ -157,12 +159,14 @@ function App() {
       </header>
 
       <main className="page" id="main" tabIndex={-1}>
-        <section className="intro" aria-labelledby="intro-heading">
+        <section className={compact ? 'intro is-compact' : 'intro'} aria-labelledby="intro-heading">
           <h1 id="intro-heading">Check branches for conflicts before merging</h1>
-          <p className="intro-text">
-            MergeGuard diffs every branch against the base, asks Nemotron to explain pairs that change related
-            code, and runs tests on the merged result to prove conflicts that git merges without a marker.
-          </p>
+          {!compact && (
+            <p className="intro-text">
+              MergeGuard diffs every branch against the base, asks Nemotron to explain pairs that change related
+              code, and runs tests on the merged result to prove conflicts that git merges without a marker.
+            </p>
+          )}
 
           <form onSubmit={handleSubmit} className="repo-form" noValidate aria-label="Analyze a repository">
             <div className="field field-repo">
@@ -210,7 +214,7 @@ function App() {
           {hasDemo && (
             <div className="demos" role="group" aria-labelledby="demos-label">
               <p id="demos-label" className="demos-label">
-                Or run a bundled demo
+                {compact ? 'Demos' : 'Or run a bundled demo'}
               </p>
               <ul className="demo-list">
                 {DEMO_REPO_PATH && (
@@ -220,13 +224,15 @@ function App() {
                       className="btn"
                       onClick={() => handleTryDemo(DEMO_REPO_PATH)}
                       disabled={loading}
-                      aria-describedby="demo-note"
+                      aria-describedby={compact ? undefined : 'demo-note'}
                     >
                       Try demo repo
                     </button>
-                    <span className="demo-note" id="demo-note">
-                      Checkout service. Two branches change how discount and tax combine; git merges them cleanly.
-                    </span>
+                    {!compact && (
+                      <span className="demo-note" id="demo-note">
+                        Checkout service. Two branches change how discount and tax combine; git merges them cleanly.
+                      </span>
+                    )}
                   </li>
                 )}
                 {API_DEMO_REPO_PATH && (
@@ -236,14 +242,16 @@ function App() {
                       className="btn"
                       onClick={() => handleTryDemo(API_DEMO_REPO_PATH)}
                       disabled={loading}
-                      aria-describedby="api-demo-note"
+                      aria-describedby={compact ? undefined : 'api-demo-note'}
                     >
                       Try API demo (Tavily)
                     </button>
-                    <span className="demo-note" id="api-demo-note">
-                      requests client and pydantic model. Two branches disagree on cents versus dollars; Tavily
-                      looks up the library docs.
-                    </span>
+                    {!compact && (
+                      <span className="demo-note" id="api-demo-note">
+                        Uses requests and pydantic. Two branches disagree on cents versus dollars; Tavily looks up
+                        the library docs.
+                      </span>
+                    )}
                   </li>
                 )}
               </ul>

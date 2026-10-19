@@ -99,7 +99,8 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Try API demo (Tavily)' })).toHaveAccessibleDescription(/Tavily/);
     expect(await screen.findByText('Sentinel online')).toBeInTheDocument();
     expect(screen.getByText('git+Nemotron')).toBeInTheDocument();
-    expect(screen.getByText('nvidia/nemotron')).toBeInTheDocument();
+    // The model id is named once, in the footer, not in the header too.
+    expect(screen.queryByText('nvidia/nemotron')).toBeNull();
   });
 
   it('shows inline progress with the target, the estimated stage and elapsed time', async () => {
@@ -114,7 +115,9 @@ describe('App', () => {
     expect(progress).toHaveAttribute('aria-busy', 'true');
     expect(progress).toHaveTextContent('/tmp/repo against develop');
     expect(progress).toHaveTextContent('0s elapsed');
-    expect(progress).toHaveTextContent('Sentinel is diffing every branch');
+    // The stage is named once, by the step list; the sentence is for the live region.
+    expect(progress).not.toHaveTextContent('Sentinel is diffing every branch');
+    expect(progress).toHaveTextContent('Diff branches: in progress');
     expect(progress).toHaveTextContent(/estimated/);
     expect(screen.getByRole('button', { name: 'Analyzing…' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Sentinel is diffing every branch.');
@@ -131,7 +134,10 @@ describe('App', () => {
     const verdict = await screen.findByRole('heading', { name: '1 hidden conflict proven by tests' });
     const pairHeading = screen.getByRole('heading', { level: 3, name: /feat\/discount-cap\s+and\s+feat\/tax-before-discount/ });
     expect(verdict.compareDocumentPosition(pairHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('nvidia/nemotron', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('nvidia/nemotron', { selector: '.kv-run span' })).toBeInTheDocument();
+    // The intake collapses once a run exists: no intro paragraph, no demo notes.
+    expect(screen.queryByText(/diffs every branch against the base/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try demo repo' })).not.toHaveAccessibleDescription();
     expect(screen.getByText('Tested 1 pair on the merged code: 1 proven.')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Failure in t::a' })).toHaveTextContent('200 != 198');
   });

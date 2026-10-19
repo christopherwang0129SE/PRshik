@@ -60,19 +60,18 @@ export const VerificationDetails = ({ verification }: VerificationDetailsProps) 
           <span className="status" data-tone={status.tone}>
             {status.label}
           </span>
-          <span className="status-reason">{verification.reason}</span>
+          {verification.status !== 'confirmed' && <span className="status-reason">{verification.reason}</span>}
         </p>
         {verification.status === 'confirmed' && (
           <ProofTable runs={confirmingRuns(verification)} label="Intent test results per checkout" />
         )}
         {confirming.length > 0 && (
-          <p className="fails-on-merge">
+          <p className="fails-on-merge" data-many={confirming.length > 1 || undefined}>
             Fails on merge:{' '}
-            {confirming.map((name, index) => (
-              <span key={name}>
-                {index > 0 && ', '}
-                <code className="test-id">{name}</code>
-              </span>
+            {confirming.map((name) => (
+              <code key={name} className="test-id">
+                {name}
+              </code>
             ))}
           </p>
         )}
@@ -95,8 +94,11 @@ export const VerificationDetails = ({ verification }: VerificationDetailsProps) 
                 </>
               )}{' '}
               <span className="tabular">
-                ({verification.attempts} attempt{verification.attempts === 1 ? '' : 's'}
-                {verification.cached_test ? ', cached' : ''}, {verification.duration_s.toFixed(1)}s)
+                (
+                {verification.cached_test
+                  ? 'cached'
+                  : `${verification.attempts} attempt${verification.attempts === 1 ? '' : 's'}`}
+                , {verification.duration_s.toFixed(1)}s)
               </span>
             </summary>
             <CodeBlock code={verification.test_code} label="Generated test code" numbered marked={failingLines} />
@@ -105,6 +107,7 @@ export const VerificationDetails = ({ verification }: VerificationDetailsProps) 
         {verification.runs.length > 0 && (
           <details className="more">
             <summary>All runs</summary>
+            {verification.status === 'confirmed' && <p className="more-note">{verification.reason}</p>}
             <ul className="run-list">
               {verification.runs.map((run) => (
                 <li key={run.target}>

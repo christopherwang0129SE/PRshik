@@ -92,15 +92,6 @@
   white-space: nowrap;
 }
 
-.backend-model {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .page {
   flex: 1;
   padding-top: var(--s5);
@@ -265,6 +256,26 @@
   max-width: 72ch;
 }
 
+/* After a run: the demos shrink to one row so the outcome sits higher. */
+.is-compact .demos {
+  margin-top: var(--s3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+}
+
+.is-compact .demo-list {
+  margin-top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.is-compact .demo-list > li {
+  display: block;
+}
+
 /* ---------- Progress, errors ---------- */
 
 .progress,
@@ -301,11 +312,6 @@
   color: var(--fg-muted);
   font-family: var(--mono);
   font-size: var(--text-sm);
-}
-
-.progress-stage {
-  margin-top: var(--s2);
-  font-weight: 500;
 }
 
 .progress-steps {
@@ -496,6 +502,11 @@
   color: var(--fg-muted);
 }
 
+/* Model and usage: reference facts, quieter than the findings above. */
+.kv-run > dd {
+  color: var(--fg-muted);
+}
+
 .kv-rows > div > dd {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -523,10 +534,16 @@
   font-family: var(--sans);
 }
 
-/* Level words: colour only where the level asks for action. */
+/* Level words: colour and weight only where the level asks for action. */
 .level {
-  font-weight: 600;
   color: var(--fg-muted);
+}
+
+[data-level='high'] > .level,
+[data-level='medium'] > .level,
+[data-level='high'] .score .level,
+[data-level='medium'] .score .level {
+  font-weight: 600;
 }
 
 [data-level='high'] > .level,
@@ -665,6 +682,10 @@
   gap: var(--s2);
 }
 
+.fact-body > p.muted {
+  font-size: var(--text-sm);
+}
+
 .prose p {
   max-width: 75ch;
   text-wrap: pretty;
@@ -749,6 +770,11 @@
 .fails-on-merge {
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
+}
+
+/* Several failing tests: one name per line, no comma run-on. */
+.fails-on-merge[data-many] .test-id {
+  display: block;
 }
 
 .more > summary {
@@ -894,8 +920,8 @@
 }
 
 .quiet summary {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr);
   align-items: baseline;
   gap: 2px var(--s4);
   padding: var(--s2) 0 var(--s2) var(--s4);
@@ -908,12 +934,12 @@
   display: none;
 }
 
-/* Disclosure cue: a caret that turns when the row opens. */
+/* Disclosure cue: a caret on the first line that turns when the row opens. */
 .quiet summary::before {
   content: '';
   position: absolute;
   left: 2px;
-  top: 50%;
+  top: calc(var(--s2) + 0.8em);
   width: 6px;
   height: 6px;
   border-right: 1.5px solid var(--fg-muted);
@@ -941,7 +967,6 @@
 }
 
 .quiet-why {
-  flex: 1 1 24ch;
   min-width: 0;
   font-size: var(--text-sm);
   color: var(--fg-muted);
@@ -960,7 +985,7 @@
     padding-inline: var(--s4);
   }
 
-  .backend-model,
+  .backend-mode,
   .backend-extra {
     display: none;
   }
@@ -1019,5 +1044,21 @@
 
   .quiet .facts {
     margin-left: 0;
+  }
+
+  .quiet summary {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .quiet-why {
+    grid-column: 1 / -1;
+  }
+
+  .is-compact .demo-list > li {
+    display: block;
+  }
+
+  .is-compact .demo-list > li + li {
+    margin-top: 0;
   }
 }
