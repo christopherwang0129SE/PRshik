@@ -10,7 +10,9 @@ attributes called on the module alias). A library with no symbol falls back to
 ``"<library> documentation"``. ``requests``, ``fastapi``, ``pydantic``, and
 ``react`` also send ``include_domains`` for their official docs host. Hits
 whose title and content never mention the library are dropped; that is not
-an error.
+an error. A translated mirror (Read the Docs ``/projects/<lang>/``, or a path
+segment such as ``/it/`` or ``/zh-cn/``) is dropped when any other hit remains,
+and ``/en/latest`` and ``/en/master`` copies of one page count once.
 
 ``tavily-python`` 0.5.0 hardcodes a 100s ``requests`` timeout, so the call is
 an httpx POST to ``https://api.tavily.com/search`` bounded by
@@ -24,6 +26,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -46,6 +49,27 @@ _OFFICIAL_DOMAINS = {
     "pydantic": "docs.pydantic.dev",
     "react": "react.dev",
 }
+
+# Full path segments that mean a translated docs tree. ``iteration`` does not
+# match; the segment has to be the locale itself. Underscores are normalized
+# (``zh_CN`` == ``zh-cn``).
+_NON_ENGLISH_PATH_SEGMENTS = frozenset({
+    "it", "zh-cn", "ja", "ko", "fr", "de", "es", "pt-br", "ru",
+})
+_ENGLISH_LOCALES = frozenset({"en", "en-us", "en-gb", "en-au"})
+# Read the Docs hosts translations as subprojects. ``cn`` is the Chinese
+# project slug; the locale segment beside it is ``zh-cn``, which the set
+# above already catches. Other slugs show up the same way (``/projects/ja/``).
+_RTD_TRANSLATION_SLUGS = _NON_ENGLISH_PATH_SEGMENTS | frozenset({
+    "cn", "zh", "zh-tw", "zh-hans", "zh-hant", "pt", "jp", "kr",
+    "pt-pt", "es-mx", "uk", "pl", "nl", "tr", "bg", "da", "ar",
+    "sv", "fi", "el", "hu", "no", "nb", "ro", "sk", "th", "vi",
+    "fa", "he", "id", "cs", "ua",
+})
+# Floating version names for one page. Numbered releases stay distinct so
+# ``/en/3.11/`` and ``/en/3.12/`` are not collapsed.
+_FLOATING_VERSIONS = frozenset({"latest", "master", "main", "stable"})
+_VERSION_LOCALES = _ENGLISH_LOCALES | _NON_ENGLISH_PATH_SEGMENTS | _RTD_TRANSLATION_SLUGS
 
 _STDLIB = {name.lower() for name in sys.stdlib_module_names}
 _STDLIB.add("__future__")
@@ -822,6 +846,93 @@ def _collect(queries: list[str]) -> list[DocSnippet]:
     return _trim(grouped)
 
 
+def _norm_locale(segment: str) -> str:
+    return segment.casefold().replace("_", "-")
+
+
+def _is_readthedocs_host(host: str) -> bool:
+    name = host.split(":", 1)[0]
+    return (
+        name == "readthedocs.io"
+        or name.endswith(".readthedocs.io")
+        or name == "readthedocs.org"
+        or name.endswith(".readthedocs.org")
+    )
+
+
+def _is_translated_doc_url(url: str) -> bool:
+    """True when the path is a non-English docs mirror.
+
+    Two shapes count: a locale segment (``/fr/``, ``/zh-cn/``) anywhere, and a
+    Read the Docs translation subproject (``/projects/cn/``, ``/projects/it/``).
+    English ``/en/`` stays. A longer segment such as ``iteration`` does not match.
+    """
+    split = urlsplit(url)
+    locales = [_norm_locale(part) for part in split.path.split("/") if part]
+    if any(part in _NON_ENGLISH_PATH_SEGMENTS for part in locales):
+        return True
+    if not _is_readthedocs_host(split.netloc.casefold()):
+        return False
+    for index, part in enumerate(locales):
+        if part != "projects" or index + 1 >= len(locales):
+            continue
+        slug = locales[index + 1]
+        if slug not in _ENGLISH_LOCALES and slug in _RTD_TRANSLATION_SLUGS:
+            return True
+    return False
+
+
+def _doc_page_key(url: str) -> str:
+    """Identity of a doc page, ignoring the floating version segment.
+
+    ``/en/latest/user/advanced.html`` and ``/en/master/user/advanced.html``
+    share a key. The locale stays, so a translation is not the English page.
+    """
+    split = urlsplit(url.strip())
+    parts = [part for part in split.path.split("/") if part]
+    kept: list[str] = []
+    index = 0
+    while index < len(parts):
+        current = parts[index]
+        if (
+            _norm_locale(current) in _VERSION_LOCALES
+            and index + 1 < len(parts)
+            and parts[index + 1].casefold() in _FLOATING_VERSIONS
+        ):
+            kept.append(_norm_locale(current))
+            index += 2
+            continue
+        kept.append(current.casefold())
+        index += 1
+    if kept and kept[-1].endswith(".html"):
+        kept[-1] = kept[-1][:-5]
+    if kept and kept[-1] == "index":
+        kept.pop()
+    host = split.netloc.casefold()
+    if host.startswith("www."):
+        host = host[4:]
+    return f"{host}/{'/'.join(kept)}"
+
+
+def _prefer_original_docs(results: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop translation mirrors when anything else matched, then collapse versions.
+
+    Mirrors are kept only when every hit is a translation, so the lookup still
+    returns a snippet instead of nothing. The first URL of a version pair wins.
+    """
+    originals = [item for item in results if not _is_translated_doc_url(item["url"])]
+    chosen = originals if originals else results
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for item in chosen:
+        key = _doc_page_key(item["url"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
 def _search_cached(query: str) -> list[dict[str, str]]:
     key = f"{_max_results()}\n{query.strip().casefold()}"
     with _cache_lock:
@@ -864,6 +975,7 @@ def _search_cached(query: str) -> list[dict[str, str]]:
     except Exception:
         # A bad hit must not fail the lookup. Keep the unfiltered list.
         logger.warning("Tavily relevance filter failed query=%s", _redact(query)[:200])
+    cleaned = _prefer_original_docs(cleaned)
     with _cache_lock:
         _cache[key] = cleaned
     return cleaned

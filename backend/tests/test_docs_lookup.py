@@ -395,6 +395,207 @@ def test_relevance_filter_returns_empty_instead_of_raising(
     assert docs_lookup.lookup(["import requests\n"]) == []
 
 
+def test_drops_translated_mirrors_and_dedupes_versioned_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Italian and Chinese requests mirrors lose to English; latest/master collapse."""
+    payload: dict = {"results": []}
+
+    class Client:
+        def __init__(self, api_key: str) -> None:
+            pass
+
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
+            return payload
+
+    monkeypatch.setattr(docs_lookup, "TavilyClient", Client)
+    _enable(monkeypatch)
+    monkeypatch.setattr(settings, "tavily_max_results", 8)
+
+    def urls_for(results: list[dict]) -> list[str]:
+        docs_lookup.clear_cache()
+        payload["results"] = results
+        return [item.url for item in docs_lookup.lookup(["import requests\n"])]
+
+    english_advanced = {
+        "title": "Advanced Usage",
+        "url": "https://requests.readthedocs.io/en/latest/user/advanced.html",
+        "content": "requests advanced usage",
+    }
+    english_master = {
+        "title": "Advanced Usage",
+        "url": "https://requests.readthedocs.io/en/master/user/advanced.html",
+        "content": "requests advanced usage",
+    }
+    english_api = {
+        "title": "API",
+        "url": "https://requests.readthedocs.io/en/latest/api.html",
+        "content": "requests API",
+    }
+    italian = {
+        "title": "Uso avanzato",
+        "url": "https://requests.readthedocs.io/projects/it/it/latest/user/advanced.html",
+        "content": "requests sessione",
+    }
+    chinese = {
+        "title": "高级",
+        "url": "https://requests.readthedocs.io/projects/cn/zh-cn/latest/api.html",
+        "content": "requests 接口",
+    }
+    chinese_underscore = {
+        "title": "高级",
+        "url": "https://requests.readthedocs.io/projects/cn/zh_CN/latest/api.html",
+        "content": "requests 接口",
+    }
+    chinese_project = {
+        "title": "高级",
+        "url": "https://requests.readthedocs.io/projects/cn/latest/index.html",
+        "content": "requests 文档",
+    }
+    mirrors = [
+        italian,
+        chinese,
+        chinese_underscore,
+        chinese_project,
+        {
+            "title": "高度な使い方",
+            "url": "https://requests.readthedocs.io/ja/latest/user/advanced.html",
+            "content": "requests 高度",
+        },
+        {
+            "title": "심화",
+            "url": "https://requests.readthedocs.io/ko/latest/user/advanced.html",
+            "content": "requests 문서",
+        },
+        {
+            "title": "Fortgeschritten",
+            "url": "https://requests.readthedocs.io/de/latest/user/advanced.html",
+            "content": "requests fortgeschritten",
+        },
+        {
+            "title": "Avanzado",
+            "url": "https://requests.readthedocs.io/es/latest/user/advanced.html",
+            "content": "requests avanzado",
+        },
+        {
+            "title": "Avançado",
+            "url": "https://requests.readthedocs.io/pt-br/latest/user/advanced.html",
+            "content": "requests avançado",
+        },
+        {
+            "title": "Дополнительно",
+            "url": "https://requests.readthedocs.io/ru/latest/user/advanced.html",
+            "content": "requests документация",
+        },
+    ]
+
+    assert urls_for([*mirrors, english_advanced, english_master, english_api]) == [
+        english_advanced["url"],
+        english_api["url"],
+    ]
+
+    # First URL of a version pair wins. A different tail stays.
+    assert urls_for([english_master, english_advanced, english_api]) == [
+        english_master["url"],
+        english_api["url"],
+    ]
+
+    # Directory, index.html, and the .html page are one Read the Docs page.
+    assert urls_for([
+        {
+            "title": "API",
+            "url": "https://requests.readthedocs.io/en/latest/api/",
+            "content": "requests API",
+        },
+        {
+            "title": "API",
+            "url": "https://requests.readthedocs.io/en/master/api/index.html",
+            "content": "requests API",
+        },
+        {
+            "title": "API",
+            "url": "https://requests.readthedocs.io/en/stable/api.html",
+            "content": "requests API",
+        },
+        english_advanced,
+    ]) == [
+        "https://requests.readthedocs.io/en/latest/api/",
+        english_advanced["url"],
+    ]
+
+    # No English hit: keep the mirrors instead of returning nothing.
+    assert urls_for([italian, chinese]) == [italian["url"], chinese["url"]]
+
+    # Same translated page under latest and master still collapses.
+    assert urls_for([
+        italian,
+        {
+            "title": "Uso avanzato",
+            "url": "https://requests.readthedocs.io/projects/it/it/master/user/advanced.html",
+            "content": "requests sessione",
+        },
+    ]) == [italian["url"]]
+
+    # The locale has to be the whole segment. ``iteration`` is not Italian.
+    assert urls_for([
+        {
+            "title": "items",
+            "url": "https://example.com/iteration/requests.html",
+            "content": "requests iteration helper",
+        },
+        italian,
+    ]) == ["https://example.com/iteration/requests.html"]
+
+    # A Read the Docs subproject that is not a translation stays.
+    dev_docs = {
+        "title": "Dev guide",
+        "url": "https://widget.readthedocs.io/projects/dev/en/latest/guide.html",
+        "content": "requests widget development",
+    }
+    assert urls_for([dev_docs, italian]) == [dev_docs["url"]]
+
+    # ``/projects/cn/`` is a translation only on Read the Docs. Elsewhere ``cn``
+    # is just another path segment, and the page stays.
+    off_host = {
+        "title": "CN project",
+        "url": "https://example.com/projects/cn/guide.html",
+        "content": "requests project notes",
+    }
+    assert urls_for([off_host]) == [off_host["url"]]
+
+    # Filter before the result cap, so mirrors ranked first cannot crowd English out.
+    monkeypatch.setattr(settings, "tavily_max_results", 2)
+    assert urls_for([italian, chinese, english_master, english_advanced, english_api]) == [
+        english_master["url"],
+        english_api["url"],
+    ]
+
+    docs_lookup.clear_cache()
+    monkeypatch.setattr(settings, "tavily_max_results", 3)
+    payload["results"] = [
+        {
+            "title": "Paramètres",
+            "url": "https://fastapi.tiangolo.com/fr/tutorial/query-params/",
+            "content": "fastapi paramètres de requête",
+        },
+        {
+            "title": "Query Parameters",
+            "url": "https://fastapi.tiangolo.com/tutorial/query-params/",
+            "content": "fastapi query parameters",
+        },
+    ]
+    assert [item.url for item in docs_lookup.lookup(["from fastapi import FastAPI\n"])] == [
+        "https://fastapi.tiangolo.com/tutorial/query-params/",
+    ]
+
+
 def test_include_domains_only_for_known_libraries(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[str, list[str] | None]] = []
 
