@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
 import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import App from './App';
-import { clearPairDiffCache } from './components/PairDiff';
+import { clearPairDiffCache } from './services/pairDiffCache';
 import type { AnalyzeResponse, PairDiffResponse, PairRisk, StreamEvent } from './types';
 
 const jsonResponse = (data: unknown, status = 200) =>

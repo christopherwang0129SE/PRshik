@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AnalyzeRequest, DiffHunk, PairDiffFile, PairDiffResponse } from '../types';
 import { fetchPairDiff } from '../services/api';
+import { pairDiffCache as cache } from '../services/pairDiffCache';
 import { alignHunks, lineCounts } from '../utils/diff';
 
 interface PairDiffProps {
@@ -16,8 +17,6 @@ type Load =
   | { state: 'error'; message: string }
   | { state: 'ready'; diff: PairDiffResponse };
 
-// Diffs only change when the branches do; keep them for the session.
-const cache = new Map<string, PairDiffResponse>();
 
 const STATUS_TEXT: Record<string, string> = {
   modified: 'modified',
@@ -193,7 +192,8 @@ export const PairDiff = ({ source, baseBranch, branchA, branchB }: PairDiffProps
     );
   }
   if (current.state === 'error') {
-    const missing = /not found|404/i.test(current.message);
+    // FastAPI answers an unknown route with exactly "Not Found"; a proxy with "404 ...".
+    const missing = /^(not found|404\b.*)$/i.test(current.message.trim()) && !current.message.includes(':');
     return (
       <div className="inline-problem" role="alert" data-testid="diff-error">
         <p>
@@ -216,6 +216,3 @@ export const PairDiff = ({ source, baseBranch, branchA, branchB }: PairDiffProps
     </div>
   );
 };
-
-/** Test hook: forget cached diffs between tests. */
-export const clearPairDiffCache = () => cache.clear();
