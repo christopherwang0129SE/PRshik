@@ -293,6 +293,26 @@ def test_subprocess_timeout_is_enforced(tmp_path: Path) -> None:
     assert run.duration_s < 15
 
 
+def test_same_size_rewrite_in_the_same_second_runs_the_new_source(tmp_path: Path) -> None:
+    """Pytest's rewritten pyc is trusted when mtime (whole seconds) and size match."""
+    import os
+
+    body_fail = "def test_branch_a_x():\n    assert 1 == 2\n"
+    body_pass = "def test_branch_a_x():\n    assert 1 == 1\n"
+    assert len(body_fail) == len(body_pass)
+    work = tmp_path / "work"
+    work.mkdir()
+    path = work / verifier.TEST_FILENAME
+    path.write_text(body_fail)
+    failed = verifier.run_test(work, tmp_path, target="a", ref="x", selection="branch_a", timeout=20)
+    assert failed.failed == 1 and failed.passed == 0, failed.output
+    stamped = path.stat()
+    path.write_text(body_pass)
+    os.utime(path, (stamped.st_atime, stamped.st_mtime))
+    passed = verifier.run_test(work, tmp_path, target="a", ref="x", selection="branch_a", timeout=20)
+    assert passed.passed == 1 and passed.failed == 0, passed.output
+
+
 def test_eligibility_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert verifier.is_high_risk(_pair()) is True  # model level high
     assert verifier.is_high_risk(_pair(model_level="low", model_score=20, score=15, level="low")) is False

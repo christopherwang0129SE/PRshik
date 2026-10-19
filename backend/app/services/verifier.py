@@ -538,10 +538,18 @@ def run_test(
     report = tmp_root / f"report-{target}.xml"
     home = tmp_root / "home"
     home.mkdir(exist_ok=True)
+    # Pytest caches rewritten test bytecode in __pycache__, validated only by
+    # whole-second mtime and file size. A repair written in the same second
+    # with the same length would rerun the previous test. -I also ignores
+    # PYTHONDONTWRITEBYTECODE, so pass -B and drop any pyc already on disk.
+    pyc_dir = workdir / "__pycache__"
+    if pyc_dir.is_dir():
+        shutil.rmtree(pyc_dir, ignore_errors=True)
     cmd = [
         *_sandbox_prefix(tmp_root),
         python or sys.executable,
         "-I",
+        "-B",
         str(runner),
         "-q",
         "-p",
