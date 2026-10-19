@@ -7,15 +7,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from app.config import settings
-from app.schemas import AnalyzeRequest, AnalyzeResponse
-from app.services import git_service, sentinel, verifier
-
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     GitHubPullRequestSyncResponse,
 )
-from app.services import git_service, github_service, sentinel
+from app.services import git_service, github_service, sentinel, verifier
 
 router = APIRouter()
 
