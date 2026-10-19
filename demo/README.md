@@ -23,6 +23,9 @@ semantic: the two branches make opposite assumptions about what
   the explicit ASSUMPTION/CHANGE comments → flags the semantic clash (the
   discount cap assumes a pre-tax subtotal, while the other branch taxes before
   discounting).
+- **Tavily**: stays idle. `checkout.py` and its tests import only the Python
+  standard library (`unittest`). A search runs only when changed files import
+  a third-party library.
 
 Each branch passes its tests on its own. After merging both branches (no
 textual conflict) the result is wrong and at least one test fails.

@@ -1,7 +1,10 @@
 # MergeGuard
 
+**Project name: MergeGuard (final name pending).**
+
 **An agent-based system that minimises merge conflicts.**
-Built for the **Nebius & Tavily Hackathon 2026**.
+Built for the **Nebius x NVIDIA Global AI Hackathon** (Devpost; deadline Fri 30 Oct 2026, 18:00 Copenhagen time).
+Tavily is a sponsor-tool integration for library-doc lookup. It is not the name of the hackathon.
 
 Naive parallel development — whether by humans or a fleet of AI coding agents —
 collides. MergeGuard watches in-flight branches and works to **predict**, **prevent**,
@@ -13,23 +16,82 @@ and **resolve** merge conflicts before they cost anyone a day.
 |-------|------|--------|
 | **Sentinel** | *Predict* — scores conflict risk between every pair of in-flight branches from git hunk overlap, then optionally refines the riskiest pairs with NVIDIA Nemotron on Nebius Token Factory. | ✅ MVP |
 | **Planner** | *Prevent* — decomposes work into non-overlapping "zones" and suggests merge/rebase order. | ⏳ planned |
-| **Merger** | *Resolve* — semantic 3-way merge; uses **Tavily** to check current library docs, runs tests, explains the resolution. | ⏳ planned |
+| **Merger** | *Resolve* — semantic 3-way merge, then tests and an explanation of the resolution. | ⏳ planned |
 
-- **LLM inference:** Nebius Token Factory (OpenAI-compatible API)
-- **Web research:** Tavily
+- **LLM:** NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) on Nebius Token Factory, an OpenAI-compatible API at `https://api.tokenfactory.nebius.com/v1/`
+- **Library docs:** Tavily, called at runtime by Sentinel and verify-by-test
 - **Backend:** FastAPI (Python) · **Frontend:** dashboard (branch graph + risk heatmap)
 
-## Quickstart (backend)
+## How Nebius Token Factory and Tavily are used
+
+**Nebius Token Factory** serves NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`). MergeGuard does not call another model. Two jobs use it:
+
+- **Pair risk explanations.** After the static prefilter, Sentinel sends up to `NEBIUS_MAX_PAIRS` pairs to Nemotron and blends the model's `risk_score` with the git score. Details are under [Nemotron risk refinement](#nemotron-risk-refinement).
+- **Intent tests.** Verify-by-test asks Nemotron to write one pytest module for a high-risk pair, then runs it in throwaway worktrees. Details are under [Verify-by-test](#verify-by-test-intent-tests-semantic-conflicts-with-evidence).
+
+Each chat-completions call is a single attempt: the client sets `max_retries=0` and waits `NEBIUS_TIMEOUT_SECONDS` (default 40). Verify-by-test can still make several generations when a test fails on its own branch (`VERIFY_MAX_ATTEMPTS` in `.env.example` is 3). A rationale that contradicts the static signature checks gets one repair call. The response `usage` block prices prompt and completion tokens with `NEMOTRON_INPUT_USD_PER_1M` / `NEMOTRON_OUTPUT_USD_PER_1M` (defaults 0.30 / 0.90). Risk results are cached on disk under `WORKSPACE_DIR/nemotron-cache/`. Generated tests are cached under `WORKSPACE_DIR/verify-cache/`. An empty `NEBIUS_API_KEY`, or `NEBIUS_ENABLED=false`, keeps the git score and skips both jobs. The HTTP request still succeeds.
+
+The Planner and Merger agents are still planned. Token Factory is not used to produce a semantic merge.
+
+**Tavily** looks up current library documentation and adds it to those two prompts. The lookup lives in the Sentinel / verify engine. Earlier notes that put Tavily only on the future Merger are out of date.
+
+Both call sites are on the model path. An empty `NEBIUS_API_KEY` or `NEBIUS_ENABLED=false` skips Tavily as well, because Sentinel never builds those prompts. On a Nemotron cache miss, and again when verify-by-test builds a test prompt, `docs_lookup` reads the pair's changed Python and JavaScript/TypeScript. It keeps third-party imports and drops the Python standard library, Node built-ins, relative imports, and modules that belong to the repo. It sends at most two searches (one per library) as an httpx `POST` to `https://api.tavily.com/search`, with `TAVILY_TIMEOUT_SECONDS` (default 8) and `TAVILY_MAX_RESULTS` (default 3). Snippets are trimmed to 700 characters each and 2000 characters in total, then placed under the heading `Library documentation (via Tavily web search)`. A missing key, `TAVILY_ENABLED=false`, or no third-party import leaves the prompt unchanged. A failed search is logged and dropped. Snippets from a search that did succeed are still added. Analysis still finishes.
+
+Hits are returned as `docs_sources` (`title`, `url`, `query`) on the pair and, when verify-by-test searched, on `verification` as well. The snippet body stays in the prompt. The MCP tools include the same list. The dashboard pair type includes `docs_sources`, which is the data a pair card would label "Grounded with library docs". The pair table does not render that label.
+
+Search results are cached in process, per query, for the life of the process. A disk-cache hit on the risk score does not repeat the risk-prompt search, so that pair's `docs_sources` stays empty unless verify-by-test searches and attaches its list.
+
+The bundled checkout demo imports only the Python standard library, so Tavily stays idle there even with a key. A repo whose changed files import a third-party library triggers it. A live end-to-end run on a small repo that imported `requests` returned `docs_sources` from requests.readthedocs.io and related pages. The opt-in smoke test is `test_live_tavily_search_for_requests` (see [Tests](#tests)).
+
+`/api/health` reports `tavily_ready` (key present and `TAVILY_ENABLED`).
+
+| Variable | Role |
+|----------|------|
+| `TAVILY_API_KEY` | Search key. Empty skips lookup. Never commit it. |
+| `TAVILY_ENABLED` | `false` skips Tavily even when a key is set. Default `true`. |
+| `TAVILY_TIMEOUT_SECONDS` | Seconds for one search request. Default 8. |
+| `TAVILY_MAX_RESULTS` | Results requested per search. Default 3. Snippets are then trimmed. |
+
+## Setup
+
+### Backend
 
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp ../.env.example .env    # fill in keys (optional for Sentinel)
+cp ../.env.example .env
+```
+
+Edit `backend/.env`. Set `NEBIUS_API_KEY` for Nemotron. `TAVILY_API_KEY` is optional: leave it empty and library-doc lookup stays off. Never commit `backend/.env`.
+
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-Open http://localhost:8000/docs for the API.
+Open http://localhost:8000/docs for the API. Git scoring works with both keys empty.
+
+### Demo repo for the dashboard
+
+**Try demo repo** fills the repository field with `demo/checkout-demo/`. That folder is gitignored. Create it before clicking the button:
+
+```bash
+python3 demo/make_demo_repo.py
+```
+
+If the folder is missing, `POST /api/analyze` returns 400 and the dashboard shows the detail, which says the path is not a git repository. The demo uses only the Python standard library, so Tavily does not search it.
+
+### Frontend
+
+Node.js 22 is recommended.
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+The dashboard is at http://localhost:3000 and calls the API at `http://localhost:8000` (`VITE_API_BASE_URL` overrides the API origin).
 
 ### Try the Sentinel on any repo
 
@@ -63,7 +125,11 @@ and set:
 
 For each selected pair the model receives a bounded prompt: both branches'
 changed files, overlapping or adjacent hunks, a trimmed diff excerpt, and a
-few recent commit subjects. It must reply with JSON
+few recent commit subjects. When Tavily returned snippets, a
+`Library documentation (via Tavily web search)` section is inserted before
+the diff excerpts. With no snippets that section is omitted and the rest of
+the prompt is unchanged.
+It must reply with JSON
 `{"risk_score", "risk_level", "rationale"}`.
 
 The published `score` is `0.5 * git_score + 0.5 * risk_score`. If the hunks
@@ -475,12 +541,33 @@ or merge pull requests.
 
 ## Tests
 
+Backend (git fixtures, mocked Nemotron, mocked Tavily):
+
 ```bash
 cd backend && source .venv/bin/activate && pytest -q
 ```
 
-The test suite builds a throwaway git repo with intentionally overlapping branches
-and asserts the Sentinel flags them.
+The suite builds a throwaway git repo with intentionally overlapping branches
+and asserts the Sentinel flags them. The live Tavily test is skipped unless
+you opt in.
+
+MCP tests use the separate venv from the [MCP server](#mcp-server-for-cursor-claude-code-and-other-agents) section (`mcp` is not in the FastAPI requirements). `tests/test_mcp_tools.py` does not import the SDK. `tests/test_mcp_server.py` does, and skips itself when `mcp` is missing.
+
+```bash
+cd backend && ../.venv-mcp/bin/python -m pytest -q tests/test_mcp_tools.py tests/test_mcp_server.py
+```
+
+Frontend (Vitest, via `npm test`):
+
+```bash
+cd frontend && npm ci && npm test
+```
+
+Opt-in live Tavily smoke test, from `backend/` with the backend venv active. The test name is `test_live_tavily_search_for_requests`. It looks up `import requests` and expects at least one snippet. The placeholder below is not a key. Do not commit a real one.
+
+```bash
+TAVILY_API_KEY=... MERGEGUARD_LIVE_TAVILY=1 python -m pytest -q tests/test_docs_lookup.py -k live
+```
 
 ## Repo layout
 
@@ -494,7 +581,8 @@ backend/            FastAPI service
     services/
       git_service.py  pure-git diff/branch helpers (subprocess), including PR ref fetch
       github_service.py  open pull requests for seated authors (GitHub API)
-      nemotron.py     Token Factory chat-completions client
+      nemotron.py     Token Factory chat-completions client (Nemotron 3 Super)
+      docs_lookup.py  Tavily library-doc lookup for the risk and verify prompts
       sentinel.py     conflict-risk scoring (git, optional Nemotron blend)
       prefilter.py    static symbol/call prefilter before any LLM call
       ts_symbols.py   TypeScript/JavaScript declarations, imports, re-exports for the prefilter

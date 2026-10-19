@@ -6,7 +6,7 @@ This is the frontend for the MergeGuard dashboard MVP (T1). It provides a UI to 
 
 ### Prerequisites
 
-- Node.js (v18 or later)
+- Node.js 22 recommended (Vite 8's toolchain expects a current Node 20.19+ or Node 22; Node 18 is too old)
 - npm (comes with Node.js)
 - The MergeGuard backend running (see below)
 
@@ -17,9 +17,9 @@ This is the frontend for the MergeGuard dashboard MVP (T1). It provides a UI to 
    cd /path/to/mergeguard/frontend
    ```
 
-2. Install dependencies:
+2. Install dependencies from the lockfile:
    ```bash
-   npm install
+   npm ci
    ```
 
 ### Configuration
@@ -44,7 +44,7 @@ computed default):
 VITE_DEMO_REPO_PATH=/some/other/path/to/checkout-demo npm run dev
 ```
 
-Recreate the demo repo with `python3 demo/make_demo_repo.py` (idempotent).
+Create the demo repo with `python3 demo/make_demo_repo.py` (idempotent) before clicking **Try demo repo**. The folder is gitignored. If it is missing, analyze returns 400 and the dashboard shows the API detail: the path is not a git repository. The demo imports only the Python standard library, so a Tavily key does not produce `docs_sources` for it.
 
 ### Running the Backend
 
