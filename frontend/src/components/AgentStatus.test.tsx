@@ -27,7 +27,7 @@ describe('AgentStatus', () => {
     );
     expect(screen.getByText(/online/i)).toBeInTheDocument();
     expect(screen.getByText(/git\+Nemotron/i)).toBeInTheDocument();
-    expect(screen.getByText(/nemotron/i)).toBeInTheDocument();
+    expect(screen.getByText('nemotron')).toBeInTheDocument();
   });
 
   it('shows Sentinel offline when health is unavailable', () => {
@@ -35,10 +35,9 @@ describe('AgentStatus', () => {
     expect(screen.getByText(/offline/i)).toBeInTheDocument();
   });
 
-  it('shows Planner and Merger as soon chips', () => {
-    render(<AgentStatus health={health()} />);
-    expect(screen.getByText(/planner/i)).toBeInTheDocument();
-    expect(screen.getByText(/merger/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/soon/i)).toHaveLength(2);
+  it('says it is checking before the first health answer', () => {
+    render(<AgentStatus health={null} checked={false} />);
+    expect(screen.getByText('Checking backend')).toBeInTheDocument();
+    expect(screen.queryByText(/offline/i)).toBeNull();
   });
 });

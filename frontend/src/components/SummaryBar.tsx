@@ -10,10 +10,14 @@ import {
 } from '../utils/risk';
 import type { PairRisk, RiskLevel, UsageSummary } from '../types';
 import { usageLine } from '../utils/usage';
+import { verdictFor, type VerdictTone } from '../utils/verdict';
+import type { CSSProperties, Ref } from 'react';
 
 interface SummaryBarProps {
   pairs: PairRisk[];
   usage?: UsageSummary | null;
+  /** Receives the verdict heading so the app can move focus to it. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }
 
 /**
@@ -44,7 +48,18 @@ const disagreeCount = (pairs: PairRisk[]): number =>
 const modelUsedCount = (pairs: PairRisk[]): number =>
   pairs.filter((pair) => pair.score_source === 'model').length;
 
-export const SummaryBar = ({ pairs, usage }: SummaryBarProps) => {
+const KICKER: Record<VerdictTone, string> = {
+  proven: 'Verdict: proven',
+  risky: 'Verdict: needs review',
+  clear: 'Verdict: clear',
+  empty: 'Verdict',
+};
+
+/**
+ * The verdict for one analysis: a headline saying what was found and how it
+ * is known, then the counts and the LLM usage in smaller print.
+ */
+export const SummaryBar = ({ pairs, usage, headingRef }: SummaryBarProps) => {
   const total = pairs.length;
   const worst = worstLevel(pairs);
   const hidden = pairs.filter((pair) => isHiddenConflict(pair)).length;
@@ -89,20 +104,30 @@ export const SummaryBar = ({ pairs, usage }: SummaryBarProps) => {
     line2 = 'Nemotron agrees with git on all pairs';
   }
 
+  const verdict = verdictFor(pairs);
+
   return (
-    <div
+    <section
       className="summary-bar"
-      style={{ borderLeftColor: levelToColor(worst) }}
-      role="status"
-      aria-label="Analysis summary"
+      data-tone={verdict.tone}
+      style={{ '--verdict-color': levelToColor(verdict.tone === 'empty' ? worst : verdict.level) } as CSSProperties}
+      aria-labelledby="verdict-heading"
+      data-testid="summary-bar"
     >
-      <div className="summary-line1">{line1}</div>
-      <div className="summary-line2">{line2}</div>
-      {usage && (
-        <div className="summary-usage" data-testid="summary-usage">
-          {usageLine(usage)}
-        </div>
-      )}
-    </div>
+      <p className="verdict-kicker">{KICKER[verdict.tone]}</p>
+      <h2 id="verdict-heading" className="verdict-headline" ref={headingRef} tabIndex={-1}>
+        {verdict.headline}
+      </h2>
+      <p className="verdict-detail">{verdict.detail}</p>
+      <div className="summary-meta">
+        <p className="summary-line1">{line1}</p>
+        <p className="summary-line2">{line2}</p>
+        {usage && (
+          <p className="summary-usage" data-testid="summary-usage">
+            {usageLine(usage)}
+          </p>
+        )}
+      </div>
+    </section>
   );
 };

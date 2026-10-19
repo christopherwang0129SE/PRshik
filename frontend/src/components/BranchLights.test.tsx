@@ -18,15 +18,18 @@ const pair = (a: string, b: string, level: PairRisk['level'], score: number): Pa
   fallback_reason: null,
 });
 
+// Each light is a list item: branch name, then its level word.
+const lightFor = (branch: string) => screen.getByText(branch, { selector: '.light-branch' }).closest('li')!;
+
 describe('BranchLights', () => {
   it('renders a light and text label for every branch', () => {
     const pairs = [pair('feature/a', 'feature/b', 'high', 90)];
     render(<BranchLights branches={['feature/a', 'feature/b', 'feature/c']} pairs={pairs} />);
 
-    expect(screen.getByText(/feature\/a: High/i)).toBeInTheDocument();
-    expect(screen.getByText(/feature\/b: High/i)).toBeInTheDocument();
+    expect(lightFor('feature/a')).toHaveTextContent('High');
+    expect(lightFor('feature/b')).toHaveTextContent('High');
     // feature/c has no pairs -> none
-    expect(screen.getByText(/feature\/c: None/i)).toBeInTheDocument();
+    expect(lightFor('feature/c')).toHaveTextContent('None');
   });
 
   it('uses the highest level among a branch pairs', () => {
@@ -35,7 +38,7 @@ describe('BranchLights', () => {
       pair('feature/a', 'feature/c', 'high', 95),
     ];
     render(<BranchLights branches={['feature/a']} pairs={pairs} />);
-    expect(screen.getByText(/feature\/a: High/i)).toBeInTheDocument();
+    expect(lightFor('feature/a')).toHaveTextContent('High');
   });
 
   it('shows an empty state when there are no branches', () => {
@@ -69,7 +72,7 @@ describe('BranchLights', () => {
         pairs={pairs}
       />
     );
-    expect(screen.getByText(/feat\/discount-cap: High/i)).toBeInTheDocument();
-    expect(screen.getByText(/feat\/tax-before-discount: High/i)).toBeInTheDocument();
+    expect(lightFor('feat/discount-cap')).toHaveTextContent('High');
+    expect(lightFor('feat/tax-before-discount')).toHaveTextContent('High');
   });
 });

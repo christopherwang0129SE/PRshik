@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { VerificationDetails } from './VerificationDetails'
-import { PairTable } from './PairTable'
+import { confirmingRuns } from '../utils/verification'
+import { PairList } from './PairList'
 import { usageLine } from '../utils/usage'
 import type { PairRisk, Verification, UsageSummary } from '../types'
 
@@ -48,7 +49,7 @@ const pair = (extra: Partial<PairRisk> = {}): PairRisk => ({
 describe('VerificationDetails', () => {
   it('shows a Confirmed by intent test badge for a confirmed pair', () => {
     render(<VerificationDetails verification={verification()} />)
-    expect(screen.getByText('Confirmed by intent test (Nemotron)')).toHaveClass('badge-confirmed')
+    expect(screen.getByText('Confirmed by intent test')).toHaveClass('badge-confirmed')
   })
 
   it('keeps the generated test collapsed until expanded', () => {
@@ -66,7 +67,7 @@ describe('VerificationDetails', () => {
     const { rerender } = render(
       <VerificationDetails verification={verification({ status: 'suspected', reason: 'generated test also passes on the merge' })} />
     )
-    expect(screen.queryByText('Confirmed by intent test (Nemotron)')).toBeNull()
+    expect(screen.queryByText('Confirmed by intent test')).toBeNull()
     expect(screen.getByText('Suspected: intent test inconclusive')).toBeInTheDocument()
     rerender(
       <VerificationDetails verification={verification({ status: 'skipped', test_code: null, runs: [] })} />
@@ -77,18 +78,18 @@ describe('VerificationDetails', () => {
 
   it('renders inside the pair table row only for pairs that were verified', () => {
     render(
-      <PairTable
+      <PairList
         pairs={[pair({ verification: verification() }), pair({ branch_b: 'docs/readme', score: 0, level: 'none', verification: null })]}
         risk_model="nvidia/nemotron-3-super-120b-a12b"
       />
     )
     expect(screen.getAllByTestId('verification')).toHaveLength(1)
-    expect(screen.getByText('Confirmed by intent test (Nemotron)')).toBeInTheDocument()
+    expect(screen.getByText('Confirmed by intent test')).toBeInTheDocument()
   })
 
   it('shows the raised score note in the level cell of a confirmed pair', () => {
     const { container } = render(
-      <PairTable
+      <PairList
         pairs={[
           pair({
             score: 90,
@@ -110,14 +111,14 @@ describe('VerificationDetails', () => {
     expect(screen.getByText('10')).toBeInTheDocument()
     expect(screen.getByText('85')).toBeInTheDocument()
     // Confirmed/High uses the red edge, not the amber hidden-conflict edge.
-    const row = container.querySelector('tbody tr')
-    expect(row!.classList.contains('row-confirmed')).toBe(true)
-    expect(row!.classList.contains('row-hidden-conflict')).toBe(false)
+    const row = container.querySelector('[data-testid="pair-card"]')
+    expect(row!.classList.contains('pair-confirmed')).toBe(true)
+    expect(row!.classList.contains('pair-hidden-conflict')).toBe(false)
   })
 
   it('shows no note for a suspected pair', () => {
     render(
-      <PairTable
+      <PairList
         pairs={[pair({ verification: verification({ status: 'suspected' }) })]}
         risk_model={null}
       />
@@ -136,5 +137,27 @@ describe('VerificationDetails', () => {
     expect(usageLine(usage)).toBe(
       '2 LLM calls · 8,715 tokens · $0.0054 est. · 2 filtered before LLM · 1/1 confirmed by intent test'
     )
+  })
+})
+
+describe('intent test proof strip', () => {
+  it('counts only the confirming tests per checkout, not discarded ones', () => {
+    const v = verification({
+      confirming_tests: ['test_a'],
+      runs: [
+        { target: 'a', ref: 'feat/a', selection: 'branch_a', exit_code: 0, passed: 1, failed: 0, errors: 0, timed_out: false, duration_s: 0.1, output: '', cases: { test_a: 'passed' } },
+        { target: 'b', ref: 'feat/b', selection: 'branch_b', exit_code: 1, passed: 0, failed: 1, errors: 0, timed_out: false, duration_s: 0.1, output: '', cases: { test_b: 'failed' } },
+        { target: 'merge', ref: 'feat/a+feat/b', selection: 'branch', exit_code: 1, passed: 0, failed: 2, errors: 0, timed_out: false, duration_s: 0.1, output: '', cases: { test_a: 'failed', test_b: 'failed' } },
+      ],
+    })
+    expect(confirmingRuns(v).map((r) => [r.target, r.passed, r.failed])).toEqual([
+      ['a', 1, 0],
+      ['merge', 0, 1],
+    ])
+    render(<VerificationDetails verification={v} />)
+    const strip = screen.getByRole('list', { name: 'Test results per checkout' })
+    expect(strip).toHaveTextContent('On feat/a1 passed')
+    expect(strip).toHaveTextContent('On the merge1 failed')
+    expect(strip).not.toHaveTextContent('feat/b')
   })
 })

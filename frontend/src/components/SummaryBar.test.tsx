@@ -154,7 +154,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(screen.getByText('1 hidden conflict among 3 pairs')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveStyle({ borderLeftColor: '#f59e0b' })
+    expect(screen.getByTestId('summary-bar').style.getPropertyValue('--verdict-color')).toBe('#f59e0b')
   })
 
   it('pluralizes hidden conflicts', () => {
@@ -199,7 +199,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(screen.getByText('1 hidden conflict among 2 pairs')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveStyle({ borderLeftColor: '#ef4444' })
+    expect(screen.getByTestId('summary-bar').style.getPropertyValue('--verdict-color')).toBe('#ef4444')
   })
 
   it('appends the hidden count when shown medium/high pairs exist', () => {
@@ -347,5 +347,11 @@ describe('SummaryBar confirmed by test', () => {
     expect(
       screen.getByText('1 of 2 branch pairs at high risk · 1 confirmed by test (1 by branch test)')
     ).toBeInTheDocument()
+  })
+
+  it('leads with a verdict heading above the counts', () => {
+    render(<SummaryBar pairs={[pair('a', 'b', 5, 'low'), pair('c', 'd', 0, 'none')]} />)
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('No conflicts found')
+    expect(screen.getByTestId('summary-bar')).toHaveAttribute('data-tone', 'clear')
   })
 })

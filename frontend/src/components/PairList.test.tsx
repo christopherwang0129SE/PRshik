@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { PairTable } from './PairTable'
+import { PairList } from './PairList'
 import type { PairRisk } from '../types'
 
 const pair = (
@@ -25,15 +25,15 @@ const pair = (
   ...extra,
 })
 
-describe('PairTable', () => {
+describe('PairList', () => {
   it('sorts pairs by score descending', () => {
     const pairs = [
       pair('a', 'b', 10, 'low'),
       pair('c', 'd', 90, 'high'),
       pair('e', 'f', 50, 'medium'),
     ]
-    const { container } = render(<PairTable pairs={pairs} risk_model={null} />);
-    const rows = container.querySelectorAll('tbody tr');
+    const { container } = render(<PairList pairs={pairs} risk_model={null} />);
+    const rows = container.querySelectorAll('[data-testid="pair-card"], [data-testid="quiet-row"]');
     // First data row should be the highest score (90)
     expect(rows[0].textContent).toContain('90');
     expect(rows[1].textContent).toContain('50');
@@ -42,7 +42,7 @@ describe('PairTable', () => {
 
   it('shows the published risk as "Risk N / 100" plus the level word', () => {
     const pairs = [pair('a', 'b', 80, 'high')];
-    render(<PairTable pairs={pairs} risk_model={null} />);
+    render(<PairList pairs={pairs} risk_model={null} />);
     expect(screen.getByText('Risk 80 / 100')).toBeInTheDocument();
     expect(screen.getByText('High')).toBeInTheDocument();
   });
@@ -55,11 +55,9 @@ describe('PairTable', () => {
         model_score: 80,
       }),
     ];
-    const { container } = render(<PairTable pairs={pairs} risk_model="nemotron" />);
-    const row = container.querySelector('tbody tr');
-    const cells = Array.from(row!.querySelectorAll('td')).map((c) => c.textContent);
-    expect(cells).toContain('40');
-    expect(cells).toContain('80');
+    render(<PairList pairs={pairs} risk_model="nemotron" />);
+    expect(screen.getByTestId('git-score')).toHaveTextContent('40');
+    expect(screen.getByTestId('model-score')).toHaveTextContent('80');
   });
 
   it('shows a Nemotron source badge for model-sourced pairs', () => {
@@ -70,7 +68,7 @@ describe('PairTable', () => {
         model_score: 80,
       }),
     ];
-    render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(screen.getByText('Nemotron')).toBeInTheDocument();
   });
 
@@ -83,16 +81,15 @@ describe('PairTable', () => {
         fallback_reason: 'no_api_key',
       }),
     ];
-    render(<PairTable pairs={pairs} risk_model={null} />);
+    render(<PairList pairs={pairs} risk_model={null} />);
     // The badge text is split across elements ("Git fallback" + " · no_api_key"),
-    // so match the combined text of the source cell.
-    const sourceCell = screen.getByText('Git fallback').closest('td')!;
-    expect(sourceCell.textContent).toBe('Git fallback · no_api_key');
+    // so match the combined text of the badge.
+    expect(screen.getByTestId('source-badge').textContent).toBe('Git fallback · no_api_key');
   });
 
   it('shows a plain "Git fallback" badge without a reason', () => {
     const pairs = [pair('a', 'b', 30, 'low')];
-    render(<PairTable pairs={pairs} risk_model={null} />);
+    render(<PairList pairs={pairs} risk_model={null} />);
     expect(screen.getByText('Git fallback')).toBeInTheDocument();
   });
 
@@ -120,7 +117,7 @@ describe('PairTable', () => {
         ],
       }),
     ];
-    render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(
       screen.getByText('Floor rule: 2 shared files')
     ).toBeInTheDocument();
@@ -145,7 +142,7 @@ describe('PairTable', () => {
         collisions: [],
       }),
     ];
-    render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(
       screen.getByText('Floor rule: 3 shared files')
     ).toBeInTheDocument();
@@ -167,7 +164,7 @@ describe('PairTable', () => {
         model_rationale: 'Discount cap and tax order clash semantically.',
       }),
     ];
-    const { container } = render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    const { container } = render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(
       screen.getByText('Nemotron flags hidden conflict')
     ).toBeInTheDocument();
@@ -176,8 +173,8 @@ describe('PairTable', () => {
       screen.getByText('Discount cap and tax order clash semantically.')
     ).toBeInTheDocument();
     // The row is visually highlighted.
-    const row = container.querySelector('tbody tr');
-    expect(row!.classList.contains('row-hidden-conflict')).toBe(true);
+    const row = container.querySelector('[data-testid="pair-card"]');
+    expect(row!.classList.contains('pair-hidden-conflict')).toBe(true);
   });
 
   it('shows static call-site breaks and flags unsupported rationale claims', () => {
@@ -190,7 +187,7 @@ describe('PairTable', () => {
         unsupported_claims: ['g() now needs y.'],
       }),
     ];
-    render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(
       screen.getByText('Static check: f: call site use.py:3 on b does not pass new required x')
     ).toBeInTheDocument();
@@ -208,7 +205,7 @@ describe('PairTable', () => {
         model_level: 'medium',
       }),
     ];
-    render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(
       screen.queryByText('Nemotron flags hidden conflict')
     ).not.toBeInTheDocument();
@@ -224,18 +221,48 @@ describe('PairTable', () => {
         model_rationale: 'No conflicts expected.',
       }),
     ];
-    const { container } = render(<PairTable pairs={pairs} risk_model="nemotron" />);
+    const { container } = render(<PairList pairs={pairs} risk_model="nemotron" />);
     expect(
       screen.queryByText('Nemotron flags hidden conflict')
     ).not.toBeInTheDocument();
-    const row = container.querySelector('tbody tr');
-    expect(row!.classList.contains('row-hidden-conflict')).toBe(false);
+    // Nothing to act on: a quiet row, not a highlighted card.
+    expect(container.querySelector('.pair-hidden-conflict')).toBeNull();
+    expect(screen.getByTestId('quiet-row')).toBeInTheDocument();
   });
 
   it('shows an empty state when there are no pairs', () => {
-    const { container } = render(<PairTable pairs={[]} risk_model={null} />);
+    const { container } = render(<PairList pairs={[]} risk_model={null} />);
     expect(screen.getByText(/no branch pairs/i)).toBeInTheDocument();
     // No table rows should be rendered in the empty state.
-    expect(container.querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="pair-card"], [data-testid="quiet-row"]')).toHaveLength(0);
+  });
+
+  it('gives attention pairs a full card and low-risk pairs a quiet row', () => {
+    const pairs = [
+      pair('feat/a', 'feat/b', 80, 'high', { rationale: 'Both rewrite the cap.' }),
+      pair('docs/x', 'feat/a', 0, 'none', { rationale: 'No shared files.' }),
+    ];
+    render(<PairList pairs={pairs} risk_model={null} />);
+    expect(screen.getAllByTestId('pair-card')).toHaveLength(1);
+    expect(screen.getAllByTestId('quiet-row')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'The pair that needs attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Low-risk pairs/ })).toBeInTheDocument();
+  });
+
+  it('renders Tavily docs sources when present and skips non-http urls', () => {
+    const pairs = [
+      pair('feat/a', 'feat/b', 80, 'high', {
+        docs_sources: [
+          { title: 'Decimal docs', url: 'https://docs.python.org/3/library/decimal.html', query: 'decimal rounding' },
+          { title: 'Bad', url: 'javascript:alert(1)', query: 'bad' },
+        ],
+      }),
+    ];
+    render(<PairList pairs={pairs} risk_model={null} />);
+    expect(screen.getByRole('link', { name: 'Decimal docs' })).toHaveAttribute(
+      'href',
+      'https://docs.python.org/3/library/decimal.html'
+    );
+    expect(screen.queryByText('Bad')).toBeNull();
   });
 });

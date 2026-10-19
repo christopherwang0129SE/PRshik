@@ -1,4 +1,4 @@
-import { getBranchRiskLevel, levelToColor, levelToText } from '../utils/risk';
+import { getBranchRiskLevel, levelToText } from '../utils/risk';
 import type { PairRisk, RiskLevel } from '../types';
 
 interface BranchLightsProps {
@@ -6,36 +6,28 @@ interface BranchLightsProps {
   pairs: PairRisk[];
 }
 
-export const BranchLights = ({ branches, pairs }: BranchLightsProps) => {
-  if (branches.length === 0) {
-    return (
-      <div className="branch-lights">
-        <h2>Branch Risk Lights</h2>
-        <p className="empty-state">No branches to display.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="branch-lights">
-      <h2>Branch Risk Lights</h2>
-      <div className="lights">
+/** Each branch with the worst risk level of any pair it is in. */
+export const BranchLights = ({ branches, pairs }: BranchLightsProps) => (
+  <section className="branch-lights" aria-labelledby="branches-heading">
+    <h3 id="branches-heading">Branches</h3>
+    {branches.length === 0 ? (
+      <p className="empty-state">No branches to display.</p>
+    ) : (
+      <ul className="lights">
         {branches.map((branch) => {
           const level: RiskLevel = getBranchRiskLevel(branch, pairs);
           return (
-            <div key={branch} className="light">
-              <div
-                className="light-circle"
-                style={{ backgroundColor: levelToColor(level) }}
-                aria-hidden="true"
-              ></div>
-              <div className="light-label">
-                {branch}: {levelToText(level)}
-              </div>
-            </div>
+            <li key={branch} className="light" data-level={level}>
+              <span className="light-dot" aria-hidden="true"></span>
+              <span className="light-branch">{branch}</span>
+              <span className="light-level">
+                <span className="sr-only">: </span>
+                {levelToText(level)}
+              </span>
+            </li>
           );
         })}
-      </div>
-    </div>
-  );
-};
+      </ul>
+    )}
+  </section>
+);

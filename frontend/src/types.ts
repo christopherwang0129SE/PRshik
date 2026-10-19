@@ -45,6 +45,9 @@ export interface DocSource {
   query: string;
 }
 
+/** Alias used by the dashboard components. */
+export type DocsSource = DocSource;
+
 export interface PairRisk {
   branch_a: string;
   branch_b: string;
