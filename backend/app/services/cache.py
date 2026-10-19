@@ -1,14 +1,16 @@
 """Disk cache for Nemotron pair assessments.
 
 Key = (base_sha, head_a_sha, head_b_sha, model, prompt_version). Entries live
-under ``workspace_dir/nemotron-cache/`` as one JSON file per key.
+under ``workspace_dir/nemotron-cache/`` as one JSON file per key. The value
+includes the ``docs_sources`` that grounded that assessment. Files written
+before the field existed still load; their source list is empty.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,8 @@ class CachedAssessment:
     cached_at: float
     model: str
     prompt_version: str
+    # Absent on entries written before this field. ``get`` fills [].
+    docs_sources: list[dict[str, str]] = field(default_factory=list)
 
 
 def _dir() -> Path:
@@ -60,6 +64,10 @@ def get(key: str) -> CachedAssessment | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if not isinstance(data, dict):
+        return None
+    # Older files omit docs_sources. A bad value must not drop the assessment.
+    data["docs_sources"] = _sources(data.get("docs_sources"))
     try:
         return CachedAssessment(**data)
     except TypeError:
@@ -99,4 +107,28 @@ def from_payload(data: dict[str, Any], *, model: str) -> CachedAssessment:
         cached_at=now(),
         model=model,
         prompt_version=PROMPT_VERSION,
+        docs_sources=_sources(data.get("docs_sources")),
     )
+
+
+def _sources(raw: Any) -> list[dict[str, str]]:
+    """Keep ``{title, url, query}`` records. Missing or invalid input is []."""
+    if not isinstance(raw, list):
+        return []
+    cleaned: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        title = item.get("title")
+        query = item.get("query")
+        cleaned.append(
+            {
+                "title": title if isinstance(title, str) else "",
+                "url": url,
+                "query": query if isinstance(query, str) else "",
+            }
+        )
+    return cleaned

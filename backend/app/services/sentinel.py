@@ -11,8 +11,10 @@ changed symbols overlap (A edits ``def f``, B calls ``f``). Harmless pairs are
 marked ``fallback_reason="prefiltered"`` and never reach the model. The top K
 candidates (``NEBIUS_MAX_PAIRS``, default 5) are sent to NVIDIA Nemotron on
 Token Factory; results are cached on disk keyed by (base sha, head shas,
-model, prompt version), so an identical re-run makes zero LLM calls. Token
-usage and estimated $ are returned in ``usage``.
+model, prompt version), so an identical re-run makes zero LLM calls. The
+cached entry includes that pair's ``docs_sources`` and a hit restores them
+with no new Tavily lookup. Token usage and estimated $ are returned in
+``usage``.
 
 When Tavily is configured (``TAVILY_API_KEY`` set and ``TAVILY_ENABLED``),
 third-party libraries imported by a pair are looked up and a short excerpt is
@@ -268,6 +270,11 @@ def _refine_one(
         if hit is not None:
             meter.record_cache_hit()
             level = hit.risk_level if hit.risk_level in ("none", "low", "medium", "high") else None
+            # Stored with the assessment. A hit must not call Tavily or the model.
+            # Entries written before the field existed load as an empty list.
+            pair = pair.model_copy(
+                update={"docs_sources": [DocSource(**item) for item in hit.docs_sources]}
+            )
             return _apply_assessment(
                 pair,
                 risk_score=hit.risk_score,
@@ -337,6 +344,7 @@ def _refine_one(
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
                 "estimated_cost_usd": nemotron.estimate_cost_usd(prompt_tokens, completion_tokens),
+                "docs_sources": [source.model_dump() for source in pair.docs_sources],
             },
             model=settings.nebius_model,
         ),

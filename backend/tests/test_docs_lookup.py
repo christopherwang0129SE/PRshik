@@ -11,7 +11,7 @@ import pytest
 
 from app.config import Settings, settings
 from app.schemas import BranchDiff, ChangedFile, DocSource, PairRisk
-from app.services import docs_lookup, sentinel, verifier
+from app.services import cache, docs_lookup, git_service, sentinel, verifier
 
 SECRET = "tvly-TEST-secret-value"
 
@@ -365,6 +365,117 @@ def test_analyze_puts_docs_in_the_risk_prompt_and_on_the_pair(
     assert all({"title", "url", "query"} <= set(item) for item in dumped)
     assert all(item["query"] for item in dumped)
     assert calls  # the client was actually used
+
+
+def test_disk_cache_hit_restores_docs_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second analyze is a disk-cache hit: same docs_sources, no LLM, no Tavily."""
+    repo = _pair_repo(tmp_path)
+    llm_calls: list[str] = []
+
+    def fake_complete(prompt: str, **_kwargs) -> str:
+        llm_calls.append(prompt)
+        return json.dumps({
+            "risk_score": 42,
+            "risk_level": "medium",
+            "rationale": "Both change run and import requests.",
+        })
+
+    tavily_calls: list = []
+    _install(monkeypatch, tavily_calls)
+    _enable(monkeypatch)
+    monkeypatch.setattr(settings, "nebius_api_key", "test-nebius-key")
+    monkeypatch.setattr("app.services.nemotron.complete", fake_complete)
+
+    first = sentinel.analyze(repo, "main", ["feat-a", "feat-b"], verify=False)
+    pair = first.pairs[0]
+    assert pair.score_source == "model"
+    assert pair.model_cached is False
+    sources = pair.model_dump()["docs_sources"]
+    assert sources
+    assert {item["url"] for item in sources} >= {"https://example.com/requests"}
+    assert all({"title", "url", "query"} <= set(item) for item in sources)
+    assert llm_calls
+    assert tavily_calls
+    stored = list((Path(settings.workspace_dir) / "nemotron-cache").glob("*.json"))
+    assert len(stored) == 1
+    assert json.loads(stored[0].read_text(encoding="utf-8"))["docs_sources"] == sources
+
+    # The in-process query cache would hide a second lookup. Drop it so a
+    # repeated search has to construct the client again.
+    docs_lookup.clear_cache()
+    llm_n = len(llm_calls)
+    tavily_n = len(tavily_calls)
+
+    second = sentinel.analyze(repo, "main", ["feat-a", "feat-b"], verify=False)
+    again = second.pairs[0]
+    assert len(llm_calls) == llm_n
+    assert len(tavily_calls) == tavily_n
+    assert second.usage is not None
+    assert second.usage.llm_calls == 0
+    assert second.usage.cache_hits == 1
+    assert again.model_cached is True
+    assert again.prompt_tokens == 0
+    assert again.completion_tokens == 0
+    assert again.model_dump()["docs_sources"] == sources
+
+
+def test_legacy_cache_entry_without_docs_sources_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file written before docs_sources existed still hits and yields []."""
+    repo = _pair_repo(tmp_path)
+    key = cache.cache_key(
+        base_sha=git_service.rev_parse(repo, "main"),
+        head_a=git_service.rev_parse(repo, "feat-a"),
+        head_b=git_service.rev_parse(repo, "feat-b"),
+        model=settings.nebius_model,
+    )
+    legacy = {
+        "cached_at": 1.0,
+        "completion_tokens": 4,
+        "estimated_cost_usd": 0.0,
+        "model": settings.nebius_model,
+        "prompt_tokens": 10,
+        "prompt_version": cache.PROMPT_VERSION,
+        "rationale": "legacy assessment",
+        "risk_level": "medium",
+        "risk_score": 55.0,
+        "total_tokens": 14,
+    }
+    directory = Path(settings.workspace_dir) / "nemotron-cache"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{key}.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    loaded = cache.get(key)
+    assert loaded is not None
+    assert loaded.docs_sources == []
+    assert loaded.rationale == "legacy assessment"
+
+    llm_calls: list[str] = []
+
+    def fake_complete(prompt: str, **_kwargs) -> str:
+        llm_calls.append(prompt)
+        return json.dumps({"risk_score": 1, "risk_level": "low", "rationale": "fresh"})
+
+    tavily_calls: list = []
+    _install(monkeypatch, tavily_calls)
+    _enable(monkeypatch)
+    monkeypatch.setattr(settings, "nebius_api_key", "test-nebius-key")
+    monkeypatch.setattr("app.services.nemotron.complete", fake_complete)
+
+    res = sentinel.analyze(repo, "main", ["feat-a", "feat-b"], verify=False)
+    pair = res.pairs[0]
+    assert llm_calls == []
+    assert tavily_calls == []
+    assert res.usage is not None
+    assert res.usage.llm_calls == 0
+    assert res.usage.cache_hits == 1
+    assert pair.model_cached is True
+    assert pair.score_source == "model"
+    assert pair.model_rationale == "legacy assessment"
+    assert pair.docs_sources == []
 
 
 def test_tavily_failure_does_not_fail_analysis(

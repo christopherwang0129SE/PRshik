@@ -39,7 +39,7 @@ Both call sites are on the model path. An empty `NEBIUS_API_KEY` or `NEBIUS_ENAB
 
 Hits are returned as `docs_sources` (`title`, `url`, `query`) on the pair and, when verify-by-test searched, on `verification` as well. The snippet body stays in the prompt. The MCP tools include the same list. The dashboard shows them on the pair card under "Grounded with library docs (Tavily)" (links, up to 3), and the "How this result was reached" panel notes how many docs grounded Nemotron.
 
-Search results are cached in process, per query, for the life of the process. A disk-cache hit on the risk score does not repeat the risk-prompt search, so that pair's `docs_sources` stays empty unless verify-by-test searches and attaches its list.
+Search results are cached in process, per query, for the life of the process. A disk-cache hit on the risk score restores the `docs_sources` stored with that assessment, with no new Tavily search and no Nemotron call. A cache file written before that field existed still loads and yields an empty list. Verify-by-test can still search when it builds a test prompt and attach its own list.
 
 The bundled checkout demo imports only the Python standard library, so Tavily stays idle there even with a key. A repo whose changed files import a third-party library triggers it. A live end-to-end run on a small repo that imported `requests` returned `docs_sources` from requests.readthedocs.io and related pages. The opt-in smoke test is `test_live_tavily_search_for_requests` (see [Tests](#tests)).
 
