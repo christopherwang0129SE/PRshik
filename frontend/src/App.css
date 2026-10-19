@@ -197,13 +197,14 @@
 
 .btn-demo {
   border: 1.5px solid var(--accent);
+  background: var(--accent-wash);
   color: var(--accent);
 }
 
 .btn-demo:hover:not(:disabled) {
   border-color: var(--accent-hover);
-  background: var(--accent-wash);
-  color: var(--accent-hover);
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 .btn-quiet {
@@ -1487,21 +1488,23 @@
 
 .hunk-lines code {
   display: block;
-  width: max-content;
-  min-width: 100%;
   padding-bottom: 2px;
   font-size: inherit;
 }
 
+/* Long lines wrap under their own text, not under the line number. */
 .dl {
-  display: block;
+  display: grid;
+  grid-template-columns: 5ch 2ch minmax(0, 1fr);
   padding-right: var(--s3);
-  white-space: pre;
+}
+
+.dl-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .dl-no {
-  display: inline-block;
-  width: 4ch;
   padding-right: 1ch;
   color: var(--ink-3);
   text-align: right;
@@ -1509,8 +1512,6 @@
 }
 
 .dl-sign {
-  display: inline-block;
-  width: 2ch;
   text-align: center;
   user-select: none;
 }
@@ -1531,6 +1532,51 @@
 .dl[data-kind='del'] .dl-sign {
   color: var(--fail);
   font-weight: 600;
+}
+
+.file-single > summary {
+  cursor: pointer;
+  list-style: none;
+  border-bottom: 0;
+}
+
+.file-single > summary::-webkit-details-marker {
+  display: none;
+}
+
+.file-single > summary .file-path::before {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-right: 0.6em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-0.15em) rotate(-45deg);
+  transition: transform 150ms ease-out;
+}
+
+.file-single[open] > summary .file-path::before {
+  transform: translateY(-0.25em) rotate(45deg);
+}
+
+.file-single[open] > summary {
+  border-bottom: 1px solid var(--rule);
+}
+
+.file-single > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.sbs-head-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-single > summary .file-path::before {
+    transition: none;
+  }
 }
 
 .diff-loading {

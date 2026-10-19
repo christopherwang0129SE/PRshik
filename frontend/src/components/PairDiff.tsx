@@ -44,7 +44,6 @@ const Hunk = ({ hunk }: { hunk: DiffHunk }) => (
             </span>
             <span className="sr-only">{line.kind === 'add' ? 'added: ' : line.kind === 'del' ? 'removed: ' : ''}</span>
             <span className="dl-text">{line.text || ' '}</span>
-            {'\n'}
           </span>
         ))}
       </code>
@@ -66,26 +65,50 @@ const SideHead = ({ side, branch, file }: { side: 'A' | 'B'; branch: string; fil
   );
 };
 
+/** A file only one branch touched: one column, folded until opened. */
+const OneSidedFile = ({ file, branchA, branchB }: { file: PairDiffFile; branchA: string; branchB: string }) => {
+  const side = file.a.status === 'unchanged' ? 'B' : 'A';
+  const data = side === 'A' ? file.a : file.b;
+  return (
+    <details className="file file-single">
+      <summary className="file-head">
+        <span className="file-path">{file.path}</span>
+        <span className="file-note">
+          Only {side} changes this file ({STATUS_TEXT[data.status] ?? data.status})
+        </span>
+      </summary>
+      {data.truncated && <p className="file-warn">This diff is large; the backend cut it short.</p>}
+      <div className="sbs-head sbs-head-single">
+        <SideHead side={side} branch={side === 'A' ? branchA : branchB} file={file} />
+      </div>
+      {data.hunks.length === 0 && <p className="file-empty">No text changes (binary or mode change).</p>}
+      {data.hunks.map((h) => (
+        <Hunk key={`${h.old_start}-${h.new_start}`} hunk={h} />
+      ))}
+    </details>
+  );
+};
+
 const FileDiff = ({ file, branchA, branchB }: { file: PairDiffFile; branchA: string; branchB: string }) => {
+  if (!file.shared && (file.a.status === 'unchanged' || file.b.status === 'unchanged')) {
+    return <OneSidedFile file={file} branchA={branchA} branchB={branchB} />;
+  }
   const rows = alignHunks(file);
   const overlaps = rows.filter((r) => r.overlapping).length;
-  const oneSided = file.a.status === 'unchanged' || file.b.status === 'unchanged';
   return (
     <section className="file" data-shared={file.shared || undefined} aria-label={file.path}>
       <header className="file-head">
         <h4 className="file-path">{file.path}</h4>
         <p className="file-note">
-          {file.shared
-            ? overlaps > 0 || file.overlapping
-              ? `Both branches change the same lines${overlaps > 1 ? ` in ${overlaps} places` : ''}`
-              : 'Both branches change this file, in different lines. Git merges it cleanly.'
-            : `Only ${file.a.status === 'unchanged' ? 'B' : 'A'} changes this file`}
+          {overlaps > 0 || file.overlapping
+            ? `Both branches change the same lines${overlaps > 1 ? ` in ${overlaps} places` : ''}`
+            : 'Both branches change this file, in different lines. Git merges it cleanly.'}
         </p>
       </header>
       {(file.a.truncated || file.b.truncated) && (
         <p className="file-warn">This diff is large; the backend cut it short.</p>
       )}
-      <div className="sbs" data-one-sided={oneSided || undefined}>
+      <div className="sbs">
         <div className="sbs-head">
           <SideHead side="A" branch={branchA} file={file} />
           <SideHead side="B" branch={branchB} file={file} />
