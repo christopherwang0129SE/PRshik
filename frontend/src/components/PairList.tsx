@@ -110,9 +110,8 @@ const Signals = ({ pair, withEvidence = false }: { pair: PairRisk; withEvidence?
         ))}
       </ul>
     )}
-    {pair.docs_sources && pair.docs_sources.length > 0 && <DocsSources sources={pair.docs_sources} />}
     {withEvidence && pair.branch_tests && <BranchTestDetails branchTests={pair.branch_tests} />}
-    {withEvidence && pair.verification && <VerificationDetails verification={pair.verification} />}
+    {withEvidence && pair.verification && <VerificationDetails verification={pair.verification} pairDocs={pair.docs_sources} />}
   </details>
 );
 
@@ -174,12 +173,13 @@ const PairCard = ({ pair }: { pair: PairRisk }) => {
               Not supported by the static checks: {pair.unsupported_claims.join(' ')}
             </p>
           )}
+          <DocsSources sources={pair.docs_sources} />
         </div>
 
         {(pair.branch_tests || pair.verification) && (
           <div className="pair-evidence">
             {pair.branch_tests && <BranchTestDetails branchTests={pair.branch_tests} />}
-            {pair.verification && <VerificationDetails verification={pair.verification} />}
+            {pair.verification && <VerificationDetails verification={pair.verification} pairDocs={pair.docs_sources} />}
           </div>
         )}
 
@@ -200,6 +200,7 @@ const QuietRow = ({ pair }: { pair: PairRisk }) => (
       </span>
     </div>
     <p className="quiet-rationale">{pair.rationale}</p>
+    <DocsSources sources={pair.docs_sources} />
     <Signals pair={pair} withEvidence />
   </li>
 );

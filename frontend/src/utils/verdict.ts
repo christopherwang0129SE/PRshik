@@ -1,4 +1,5 @@
 import type { AnalyzeResponse, PairRisk, RiskLevel } from '../types';
+import { usableDocs } from './docs';
 import {
   effectivePairLevel,
   isConfirmedByBranchTest,
@@ -82,7 +83,11 @@ export const verdictFor = (pairs: PairRisk[]): Verdict => {
       tone: 'risky',
       level: worst(pairs),
       headline: `${plural(risky.length, 'risky pair')} to review before merging`,
-      detail: `Flagged by the diff or by Nemotron, but no test failed on the merged code. Checked ${plural(total, 'branch pair')}.`,
+      detail: `${
+        pairs.some(testsRan)
+          ? 'Flagged by the diff or by Nemotron, but no test failed on the merged code.'
+          : 'Flagged by the diff or by Nemotron. No tests ran on the merged code.'
+      } Checked ${plural(total, 'branch pair')}.`,
     };
   }
 
@@ -102,20 +107,63 @@ export const pipelineFacts = (response: AnalyzeResponse): [string, string, strin
 
   const sent = usage?.pairs_sent_to_model ?? pairs.filter((p) => p.score_source === 'model').length;
   const skipped = usage?.pairs_prefiltered ?? pairs.filter((p) => p.fallback_reason === 'prefiltered').length;
+  const docs = usableDocs(pairs.flatMap((p) => p.docs_sources ?? [])).length;
   let explained =
     sent > 0
       ? `Reviewed ${plural(sent, 'pair')} that share code`
       : 'No pair shared enough code to need Nemotron';
+  if (sent > 0 && docs > 0) explained += `, grounded with ${plural(docs, 'library doc')} via Tavily`;
   if (sent > 0 && skipped > 0) explained += `; skipped ${skipped} with nothing in common`;
   if (usage && usage.cache_hits > 0 && usage.llm_calls === 0) explained += ' (cached answers)';
   explained += '.';
 
-  const tested = pairs.filter((p) => p.branch_tests || p.verification).length;
-  const proven = pairs.filter((p) => isConfirmedByTest(p)).length;
-  const proved =
-    tested === 0
-      ? 'No pair was risky enough to test.'
-      : `Tested ${plural(tested, 'pair')} on the merged code: ${proven > 0 ? `${proven} proven` : 'none failed'}.`;
+  return [diffed, explained, testFact(pairs)];
+};
 
-  return [diffed, explained, proved];
+/** True when pairs were picked for testing but no test ran on any of them. */
+export const noTestsRan = (pairs: PairRisk[]): boolean => {
+  const considered = pairs.filter((p) => p.branch_tests || p.verification);
+  return considered.length > 0 && !considered.some(testsRan);
+};
+
+/** Did any test actually run for this pair, branch tests or intent tests? */
+const testsRan = (pair: PairRisk): boolean =>
+  isConfirmedByTest(pair) ||
+  (pair.branch_tests?.runs.length ?? 0) > 0 ||
+  (pair.verification?.runs.length ?? 0) > 0;
+
+const sentence = (text: string): string => text.trim().replace(/\.$/, '');
+
+/**
+ * Step 3 as it happened: a pair the backend considered for testing may have
+ * been skipped (repo outside the allowed roots, no tests) without running
+ * anything, which must not read as "none failed".
+ */
+const testFact = (pairs: PairRisk[]): string => {
+  const considered = pairs.filter((p) => p.branch_tests || p.verification);
+  if (considered.length === 0) return 'No pair was risky enough to test.';
+
+  const ran = considered.filter(testsRan).length;
+  const proven = considered.filter((p) => isConfirmedByTest(p)).length;
+  if (ran === 0) {
+    const reasons = [
+      ...new Set(
+        considered
+          .flatMap((p) => [p.verification?.reason, p.branch_tests?.reason])
+          .filter((r): r is string => Boolean(r && r.trim()))
+          .map(sentence)
+      ),
+    ];
+    const skippedOnly = considered.every(
+      (p) =>
+        (!p.verification || p.verification.status === 'skipped') &&
+        (!p.branch_tests || p.branch_tests.status === 'skipped' || p.branch_tests.status === 'unsupported')
+    );
+    if (reasons.length === 1) return skippedOnly ? `No tests ran. Skipped: ${reasons[0]}.` : `No tests ran: ${reasons[0]}.`;
+    return skippedOnly ? 'No tests ran: testing was skipped.' : 'No tests ran: the test setup failed.';
+  }
+
+  let fact = `Tested ${plural(ran, 'pair')} on the merged code: ${proven > 0 ? `${proven} proven` : 'none failed'}`;
+  if (considered.length > ran) fact += `; ${considered.length - ran} skipped`;
+  return `${fact}.`;
 };

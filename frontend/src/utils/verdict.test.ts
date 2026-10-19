@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { verdictFor, pipelineFacts, needsAttention, failingTestCount } from './verdict';
-import type { AnalyzeResponse, BranchTests, PairRisk } from '../types';
+import { verdictFor, pipelineFacts, needsAttention, failingTestCount, noTestsRan } from './verdict';
+import type { AnalyzeResponse, BranchTests, PairRisk, Verification } from '../types';
 
 const bt = (extra: Partial<BranchTests> = {}): BranchTests => ({
   status: 'confirmed',
@@ -14,6 +14,31 @@ const bt = (extra: Partial<BranchTests> = {}): BranchTests => ({
   duration_s: 1,
   ...extra,
 });
+
+const skippedVerification = (extra: Partial<Verification> = {}): Verification => ({
+  status: 'skipped',
+  reason: 'verify-by-test only runs on local repos under the allowed roots',
+  runs: [],
+  attempts: 0,
+  cached_test: false,
+  merge_conflict: false,
+  duration_s: 0,
+  prompt_tokens: 0,
+  completion_tokens: 0,
+  ...extra,
+});
+
+const run = {
+  target: 'merge' as const,
+  ref: 'a+b',
+  files: [],
+  exit_code: 0,
+  passed: 3,
+  failed: 0,
+  errors: 0,
+  timed_out: false,
+  duration_s: 1,
+};
 
 const pair = (extra: Partial<PairRisk> = {}): PairRisk => ({
   branch_a: 'a',
@@ -50,6 +75,11 @@ describe('verdictFor', () => {
     expect(v.tone).toBe('risky');
     expect(v.level).toBe('high');
     expect(v.headline).toBe('2 risky pairs to review before merging');
+    expect(v.detail).toBe('Flagged by the diff or by Nemotron. No tests ran on the merged code. Checked 3 branch pairs.');
+    const tested = verdictFor([
+      pair({ score: 55, level: 'medium', branch_tests: bt({ status: 'passed', confirming: [], runs: [run] }) }),
+    ]);
+    expect(tested.detail).toBe('Flagged by the diff or by Nemotron, but no test failed on the merged code. Checked 1 branch pair.');
   });
 
   it('says no conflicts when every pair is none or low', () => {
@@ -92,5 +122,54 @@ describe('helpers', () => {
       'Reviewed 1 pair that share code; skipped 2 with nothing in common.',
       'Tested 1 pair on the merged code: 1 proven.',
     ]);
+  });
+
+  it('mentions Tavily grounding with the number of distinct http docs', () => {
+    const docs = [
+      { title: 'Requests', url: 'https://requests.readthedocs.io', query: 'requests' },
+      { title: 'Real Python', url: 'https://realpython.com/python-requests', query: 'requests' },
+      { title: 'Bad', url: 'javascript:alert(1)', query: 'x' },
+    ];
+    const response: AnalyzeResponse = {
+      base_branch: 'main',
+      branches: ['a', 'b', 'c'],
+      diffs: [],
+      pairs: [
+        pair({ score_source: 'model', docs_sources: docs }),
+        pair({ score_source: 'model', docs_sources: [docs[0]] }),
+      ],
+    };
+    expect(pipelineFacts(response)[1]).toBe('Reviewed 2 pairs that share code, grounded with 2 library docs via Tavily.');
+    expect(pipelineFacts({ ...response, pairs: [pair({ score_source: 'model' })] })[1]).toBe(
+      'Reviewed 1 pair that share code.'
+    );
+  });
+
+  it('does not claim tests ran when verification was skipped', () => {
+    const pairs = [pair({ score: 60, level: 'medium', score_source: 'model', verification: skippedVerification() })];
+    const response: AnalyzeResponse = { base_branch: 'main', branches: ['a', 'b'], diffs: [], pairs };
+    expect(pipelineFacts(response)[2]).toBe(
+      'No tests ran. Skipped: verify-by-test only runs on local repos under the allowed roots.'
+    );
+    expect(noTestsRan(pairs)).toBe(true);
+  });
+
+  it('reports a test error without calling it a pass', () => {
+    const pairs = [pair({ verification: skippedVerification({ status: 'error', reason: 'Sandbox failed to start.' }) })];
+    expect(pipelineFacts({ base_branch: 'main', branches: ['a', 'b'], diffs: [], pairs })[2]).toBe(
+      'No tests ran: Sandbox failed to start.'
+    );
+  });
+
+  it('counts only pairs whose tests ran, and notes skipped ones', () => {
+    const pairs = [
+      pair({ branch_tests: bt({ status: 'passed', confirming: [], runs: [run] }) }),
+      pair({ branch_a: 'c', verification: skippedVerification() }),
+    ];
+    expect(pipelineFacts({ base_branch: 'main', branches: ['a', 'b', 'c'], diffs: [], pairs })[2]).toBe(
+      'Tested 1 pair on the merged code: none failed; 1 skipped.'
+    );
+    expect(noTestsRan(pairs)).toBe(false);
+    expect(noTestsRan([pair()])).toBe(false);
   });
 });

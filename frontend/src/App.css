@@ -424,6 +424,11 @@ h1 {
   color: var(--low-text);
 }
 
+.pipeline-step[data-state='skipped'] .pipeline-node {
+  border-style: dashed;
+  color: var(--muted);
+}
+
 .pipeline-title {
   font-size: 1rem;
   font-weight: 650;
@@ -1087,23 +1092,39 @@ h1 {
 }
 
 .docs-sources {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 72ch;
+  padding: 10px 14px;
+  border-left: 3px solid var(--line-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--paper);
   font-size: 0.875rem;
 }
 
 .docs-title {
-  font-weight: 600;
-  color: var(--ink);
+  font-weight: 650;
+  color: var(--muted);
 }
 
 .docs-sources ul {
   display: grid;
-  gap: 2px;
-  padding-left: 1.1em;
-  list-style: disc;
+  gap: 4px;
+}
+
+.docs-sources li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.docs-query {
+.docs-host {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
   color: var(--muted);
 }
 

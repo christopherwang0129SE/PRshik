@@ -3,7 +3,7 @@ import type { AnalyzeRequest, AnalyzeResponse, HealthResponse } from './types';
 import { analyzeRepo, checkHealth, API_BASE_URL } from './services/api';
 import { classifyRepoInput } from './utils/repo';
 import { describeError, BACKEND_START_COMMAND } from './utils/errors';
-import { pipelineFacts, verdictFor } from './utils/verdict';
+import { noTestsRan, pipelineFacts, verdictFor } from './utils/verdict';
 import { BranchLights } from './components/BranchLights';
 import { PairList } from './components/PairList';
 import { SummaryBar } from './components/SummaryBar';
@@ -255,6 +255,7 @@ function App() {
               activeStep={activeStep}
               elapsedS={elapsed}
               facts={response ? pipelineFacts(response) : undefined}
+              testsSkipped={response ? noTestsRan(response.pairs) : false}
             />
           </div>
         </div>

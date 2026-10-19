@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { PairList } from './PairList'
 import type { PairRisk } from '../types'
 
@@ -249,20 +249,46 @@ describe('PairList', () => {
     expect(screen.getByRole('heading', { name: /Low-risk pairs/ })).toBeInTheDocument();
   });
 
-  it('renders Tavily docs sources when present and skips non-http urls', () => {
+  it('shows Tavily docs on the card, outside the collapsed details, safe links only', () => {
     const pairs = [
       pair('feat/a', 'feat/b', 80, 'high', {
         docs_sources: [
           { title: 'Decimal docs', url: 'https://docs.python.org/3/library/decimal.html', query: 'decimal rounding' },
           { title: 'Bad', url: 'javascript:alert(1)', query: 'bad' },
+          { title: 'Two', url: 'https://www.example.com/2', query: 'q' },
+          { title: 'Three', url: 'http://example.org/3', query: 'q' },
+          { title: 'Four', url: 'https://example.net/4', query: 'q' },
         ],
       }),
     ];
     render(<PairList pairs={pairs} risk_model={null} />);
-    expect(screen.getByRole('link', { name: 'Decimal docs' })).toHaveAttribute(
-      'href',
-      'https://docs.python.org/3/library/decimal.html'
-    );
+    const block = screen.getByTestId('docs-sources');
+    expect(block).toHaveTextContent('Grounded with library docs (Tavily)');
+    expect(block.closest('details')).toBeNull();
+    expect(block.closest('.pair-why')).not.toBeNull();
+    const links = within(block).getAllByRole('link');
+    expect(links).toHaveLength(3);
+    expect(links[0]).toHaveAttribute('href', 'https://docs.python.org/3/library/decimal.html');
+    expect(links[0]).toHaveAttribute('target', '_blank');
+    expect(links[0]).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(block).toHaveTextContent('docs.python.org');
+    expect(block).toHaveTextContent('example.com');
     expect(screen.queryByText('Bad')).toBeNull();
+    expect(screen.queryByText('Four')).toBeNull();
+    expect(screen.getAllByTestId('docs-sources')).toHaveLength(1);
+  });
+
+  it('renders no docs block when docs_sources is empty or missing', () => {
+    render(
+      <PairList
+        pairs={[
+          pair('feat/a', 'feat/b', 80, 'high', { docs_sources: [] }),
+          pair('feat/c', 'feat/d', 0, 'none'),
+        ]}
+        risk_model={null}
+      />
+    );
+    expect(screen.queryByTestId('docs-sources')).toBeNull();
+    expect(screen.queryByText(/Tavily/)).toBeNull();
   });
 });

@@ -10,6 +10,8 @@ interface PipelineProps {
   elapsedS?: number;
   /** Done mode: one result line per step. */
   facts?: [string, string, string];
+  /** Done mode: the test step was reached but no test ran. */
+  testsSkipped?: boolean;
 }
 
 const HEADINGS: Record<PipelineMode, string> = {
@@ -18,21 +20,23 @@ const HEADINGS: Record<PipelineMode, string> = {
   done: 'How this result was reached',
 };
 
-const stateOf = (mode: PipelineMode, index: number, active: number): 'todo' | 'active' | 'done' => {
-  if (mode === 'done') return 'done';
+type StepState = 'todo' | 'active' | 'done' | 'skipped';
+
+const stateOf = (mode: PipelineMode, index: number, active: number, testsSkipped: boolean): StepState => {
+  if (mode === 'done') return testsSkipped && index === STEPS.length - 1 ? 'skipped' : 'done';
   if (mode === 'intro') return 'todo';
   if (index < active) return 'done';
   return index === active ? 'active' : 'todo';
 };
 
-const STATE_TEXT = { todo: 'Up next', active: 'In progress', done: 'Done' } as const;
+const STATE_TEXT = { todo: 'Up next', active: 'In progress', done: 'Done', skipped: 'Skipped' } as const;
 
 /**
  * The three-step pipeline, drawn as a commit graph. The same list explains
  * the product on the first screen, tracks progress while the analysis runs,
  * and recaps what each step found once it is done.
  */
-export const Pipeline = ({ mode, activeStep = 0, elapsedS = 0, facts }: PipelineProps) => (
+export const Pipeline = ({ mode, activeStep = 0, elapsedS = 0, facts, testsSkipped = false }: PipelineProps) => (
   <section className={`pipeline pipeline-${mode}`} aria-labelledby="pipeline-heading">
     <div className="pipeline-head">
       <h2 id="pipeline-heading">{HEADINGS[mode]}</h2>
@@ -47,16 +51,16 @@ export const Pipeline = ({ mode, activeStep = 0, elapsedS = 0, facts }: Pipeline
     </div>
     <ol className="pipeline-steps">
       {STEPS.map((step, index) => {
-        const state = stateOf(mode, index, activeStep);
+        const state = stateOf(mode, index, activeStep, testsSkipped);
         return (
           <li key={step.title} className="pipeline-step" data-state={state}>
             <span className="pipeline-node" aria-hidden="true">
-              {state === 'done' ? '✓' : index + 1}
+              {state === 'done' ? '✓' : state === 'skipped' ? '–' : index + 1}
             </span>
             <div className="pipeline-body">
               <h3 className="pipeline-title">
                 {mode === 'running' && state === 'active' ? step.running : step.title}
-                {mode === 'running' && <span className="sr-only">: {STATE_TEXT[state]}</span>}
+                {(mode === 'running' || state === 'skipped') && <span className="sr-only">: {STATE_TEXT[state]}</span>}
               </h3>
               <p className="pipeline-text">
                 {mode === 'done' && facts ? facts[index] : step.description}
