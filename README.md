@@ -99,7 +99,7 @@ npm ci
 npm run dev
 ```
 
-The dashboard is at http://localhost:3000 and calls the API at `http://localhost:8000` (`VITE_API_BASE_URL` overrides the API origin).
+The dashboard is at http://localhost:3000 and calls the API at `http://localhost:8000` (`VITE_API_BASE_URL` overrides the API origin). If the dashboard runs on a port other than 3000, set `CORS_ALLOW_ORIGINS=http://localhost:<port>` before starting the API (the default only allows port 3000).
 
 ### Try the Sentinel on any repo
 

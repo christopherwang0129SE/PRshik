@@ -136,6 +136,12 @@ def _level(score: float) -> RiskLevel:
     return "none"
 
 
+def _plural(count: int, singular: str, plural: str | None = None) -> str:
+    """``1 pair``, ``0 pairs``, ``2 shared files``. Only 1 is singular."""
+    word = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {word}"
+
+
 def combine_scores(git_score: float, model_score: float, overlapping_files: int) -> float:
     """Blend the git hunk score with the model score. See the module docstring."""
     blended = (0.5 * git_score) + (0.5 * model_score)
@@ -169,12 +175,12 @@ def _score_pair(diff_a: BranchDiff, diff_b: BranchDiff) -> PairRisk:
 
     if overlapping:
         rationale = (
-            f"{overlapping} file(s) changed in overlapping regions by both branches — "
+            f"{_plural(overlapping, 'file')} changed in overlapping regions by both branches — "
             f"a textual merge conflict is likely."
         )
     elif shared:
         rationale = (
-            f"{len(shared)} shared file(s) but no overlapping regions — "
+            f"{_plural(len(shared), 'shared file')} but no overlapping regions — "
             f"merges cleanly today, but coordinate before divergence grows."
         )
     else:
@@ -670,7 +676,7 @@ def analyze(
             "model",
             "done",
             "Finished Nemotron scoring",
-            f"{sent} pairs scored by the model",
+            f"{_plural(sent, 'pair')} scored by the model",
         )
 
     if verify and settings.verify_enabled and not skip:
@@ -688,7 +694,13 @@ def analyze(
         confirmed = sum(
             1 for p in pairs if p.verification and p.verification.status == "confirmed"
         )
-        _stage(progress, "verify", "done", "Finished intent tests", f"{confirmed} pairs confirmed")
+        _stage(
+            progress,
+            "verify",
+            "done",
+            "Finished intent tests",
+            f"{_plural(confirmed, 'pair')} confirmed",
+        )
     else:
         if not verify:
             why = "Verification was not requested"
@@ -718,7 +730,7 @@ def analyze(
             "branch_tests",
             "done",
             "Finished branch tests",
-            f"{confirmed_tests} pairs confirmed",
+            f"{_plural(confirmed_tests, 'pair')} confirmed",
         )
     else:
         if not verify:

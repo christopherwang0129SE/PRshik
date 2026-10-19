@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.api import routes
 from app.config import settings
 from app.main import app
-from app.schemas import AnalyzeResponse
+from app.schemas import AnalyzeResponse, BranchTests, Verification
 from app.services import git_service, nemotron, sentinel, verifier
 from app.services.nemotron import NemotronError
 
@@ -24,6 +24,14 @@ def _events(response) -> list[dict]:
 
 def _stage_pairs(events: list[dict]) -> list[tuple[str, str]]:
     return [(event["stage"], event["status"]) for event in events if event["type"] == "stage"]
+
+
+def _stage_detail(events: list[dict], stage: str, status: str) -> str:
+    return next(
+        event["detail"]
+        for event in events
+        if event["type"] == "stage" and event["stage"] == stage and event["status"] == status
+    )
 
 
 def _without_elapsed(payload: dict) -> dict:
@@ -128,9 +136,79 @@ def test_model_stage_runs_when_a_key_is_set(repo: Path, monkeypatch: pytest.Monk
     events = _events(response)
     assert ("model", "start") in _stage_pairs(events)
     assert ("model", "done") in _stage_pairs(events)
+    assert _stage_detail(events, "model", "done") == "0 pairs scored by the model"
     assert ("verify", "skipped") in _stage_pairs(events)
     pair = next(event["pair"] for event in events if event["type"] == "pair" and event["pair"].get("fallback_reason") == "model_error")
     assert pair["score_source"] == "git"
+
+
+def test_stage_details_pluralize_scored_and_confirmed_pairs(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "nebius_api_key", "test-key")
+    monkeypatch.setattr(settings, "branch_tests_enabled", False)
+    monkeypatch.setattr(
+        nemotron,
+        "complete",
+        lambda _prompt: json.dumps(
+            {"risk_score": 80, "risk_level": "high", "rationale": "These edits interact."}
+        ),
+    )
+    monkeypatch.setattr(verifier, "verify_pair", lambda *_a, **_k: Verification(status="confirmed"))
+
+    one: list[dict] = []
+    sentinel.analyze(
+        repo,
+        "main",
+        ["feat-a", "feat-b"],
+        verify=True,
+        verify_allowed=True,
+        use_cache=False,
+        progress=one.append,
+    )
+    assert _stage_detail(one, "model", "done") == "1 pair scored by the model"
+    assert _stage_detail(one, "verify", "done") == "1 pair confirmed"
+
+    many: list[dict] = []
+    sentinel.analyze(
+        repo,
+        "main",
+        ["feat-a", "feat-b", "feat-c"],
+        verify=True,
+        verify_allowed=True,
+        use_cache=False,
+        progress=many.append,
+    )
+    assert _stage_detail(many, "model", "done") == "3 pairs scored by the model"
+    assert _stage_detail(many, "verify", "done") == "3 pairs confirmed"
+
+
+def test_branch_test_stage_detail_pluralizes(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outcome = {"status": "passed"}
+
+    def fake_check(_repo, _base, _a, _b):
+        return BranchTests(status=outcome["status"])
+
+    monkeypatch.setattr("app.services.branch_tests.check_pair", fake_check)
+
+    def run(branches: list[str]) -> str:
+        events: list[dict] = []
+        sentinel.analyze(
+            repo,
+            "main",
+            branches,
+            verify=True,
+            verify_allowed=True,
+            progress=events.append,
+        )
+        return _stage_detail(events, "branch_tests", "done")
+
+    assert run(["feat-a", "feat-b"]) == "0 pairs confirmed"
+    outcome["status"] = "confirmed"
+    assert run(["feat-a", "feat-b"]) == "1 pair confirmed"
+    assert run(["feat-a", "feat-b", "feat-c"]) == "3 pairs confirmed"
 
 
 def test_branch_test_stage_follows_verify(
