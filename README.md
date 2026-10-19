@@ -7,8 +7,8 @@ Built for the **Nebius x NVIDIA Global AI Hackathon** (Devpost; deadline Fri 30 
 Tavily is a sponsor-tool integration for library-doc lookup. It is not the name of the hackathon.
 
 Naive parallel development — whether by humans or a fleet of AI coding agents —
-collides. MergeGuard watches in-flight branches and works to **predict**, **prevent**,
-and **resolve** merge conflicts before they cost anyone a day.
+collides. MergeGuard scores in-flight branches for conflict risk and proves a
+semantic clash by running tests on the merged result.
 
 ## The three agents
 
@@ -20,7 +20,7 @@ and **resolve** merge conflicts before they cost anyone a day.
 
 - **LLM:** NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) on Nebius Token Factory, an OpenAI-compatible API at `https://api.tokenfactory.nebius.com/v1/`
 - **Library docs:** Tavily, called at runtime by Sentinel and verify-by-test
-- **Backend:** FastAPI (Python) · **Frontend:** dashboard (branch graph + risk heatmap)
+- **Backend:** FastAPI (Python) · **Frontend:** dashboard (verdict, per-branch risk level, pair cards)
 
 ## How Nebius Token Factory and Tavily are used
 
@@ -37,11 +37,11 @@ The Planner and Merger agents are still planned. Token Factory is not used to pr
 
 Both call sites are on the model path. An empty `NEBIUS_API_KEY` or `NEBIUS_ENABLED=false` skips Tavily as well, because Sentinel never builds those prompts. On a Nemotron cache miss, and again when verify-by-test builds a test prompt, `docs_lookup` reads the pair's changed Python and JavaScript/TypeScript. It keeps third-party imports and drops the Python standard library, Node built-ins, relative imports, and modules that belong to the repo. It sends at most two searches (one per library, at most two symbols each) as an httpx `POST` to `https://api.tavily.com/search`, with `TAVILY_TIMEOUT_SECONDS` (default 8) and `TAVILY_MAX_RESULTS` (default 3). A query names symbols from the conflicting lines: `from fastapi import Depends` becomes `fastapi Depends documentation`, and a call such as `requests.get(...)` or `session.mount(...)` after `requests.Session()` becomes `requests get documentation` or `requests Session.mount documentation`. For JavaScript, `import { useEffect } from 'react'` becomes `react useEffect documentation`. Names and attributes on added or removed lines win over imports the hunk does not use. A bare import with no symbol stays `<library> documentation`. For `requests`, `fastapi`, `pydantic`, and `react`, the request sets `include_domains` to the official docs host (`requests.readthedocs.io`, `fastapi.tiangolo.com`, `docs.pydantic.dev`, `react.dev`). Other libraries are not domain-filtered. A hit whose title and content do not mention the library is dropped. Dropping every hit is not an error. Snippets are trimmed to 700 characters each and 2000 characters in total, then placed under the heading `Library documentation (via Tavily web search)`. A missing key, `TAVILY_ENABLED=false`, or no third-party import leaves the prompt unchanged. A failed search is logged and dropped. Snippets from a search that did succeed are still added. Analysis still finishes.
 
-Hits are returned as `docs_sources` (`title`, `url`, `query`) on the pair and, when verify-by-test searched, on `verification` as well. The snippet body stays in the prompt. The MCP tools include the same list. The dashboard shows them on the pair card under "Grounded with library docs (Tavily)" (links, up to 3), and the "How this result was reached" panel notes how many docs grounded Nemotron.
+Hits are returned as `docs_sources` (`title`, `url`, `query`) on the pair and, when verify-by-test searched, on `verification` as well. The snippet body stays in the prompt. The MCP tools include the same list. The dashboard pair card lists them under "Library docs", sublabel "found by Tavily" (http(s) links, up to 6). The verdict's Nemotron line says how many grounded the review ("grounded with N library docs via Tavily").
 
 Search results are cached in process, per query, for the life of the process. A disk-cache hit on the risk score restores the `docs_sources` stored with that assessment, with no new Tavily search and no Nemotron call. A cache file written before that field existed still loads and yields an empty list. Verify-by-test can still search when it builds a test prompt and attach its own list.
 
-The bundled checkout demo imports only the Python standard library, so Tavily stays idle there even with a key. The bundled API demo (`demo/api-demo/`, `python3 demo/make_api_demo_repo.py`) is the one that triggers it: the conflicting branches change a `requests` client (`Session`, `session.mount`, `session.get(..., timeout=...)`) and a pydantic `field_validator`, so the pair card shows "Grounded with library docs (Tavily)". Any other repo whose changed files import a third-party library triggers it the same way. A live end-to-end run on a small repo that imported `requests` returned `docs_sources` from requests.readthedocs.io and related pages. The opt-in smoke test is `test_live_tavily_search_for_requests` (see [Tests](#tests)).
+The bundled checkout demo imports only the Python standard library, so Tavily stays idle there even with a key. The bundled API demo (`demo/api-demo/`, `python3 demo/make_api_demo_repo.py`) is the one that triggers it: the conflicting branches change a `requests` client (`Session`, `session.mount`, `session.get(..., timeout=...)`) and a pydantic `field_validator`, so the pair card shows "Library docs" / "found by Tavily". Any other repo whose changed files import a third-party library triggers it the same way. A live end-to-end run on a small repo that imported `requests` returned `docs_sources` from requests.readthedocs.io and related pages. The opt-in smoke test is `test_live_tavily_search_for_requests` (see [Tests](#tests)).
 
 `/api/health` reports `tavily_ready` (key present and `TAVILY_ENABLED`).
 
@@ -80,7 +80,7 @@ Both folders are gitignored. Create them before clicking the matching button. If
 | Button | Create | What a judge sees |
 |--------|--------|-------------------|
 | **Try demo repo** | `python3 demo/make_demo_repo.py` | `demo/checkout-demo/`. A checkout module. Two branches disagree about discount and tax. Git merges them cleanly. Standard library only, so Tavily does not search. |
-| **Try API demo (Tavily)** | `python3 demo/make_api_demo_repo.py` | `demo/api-demo/`. A `requests` client and a pydantic model. Two branches disagree about cents versus dollars. The changed lines name `session.mount`, `session.get`, and `field_validator`, so Tavily fills "Grounded with library docs (Tavily)" on the pair card. |
+| **Try API demo (Tavily)** | `python3 demo/make_api_demo_repo.py` | `demo/api-demo/`. A `requests` client and a pydantic model. Two branches disagree about cents versus dollars. The changed lines name `session.mount`, `session.get`, and `field_validator`, so Tavily fills "Library docs" / "found by Tavily" on the pair card. |
 
 ```bash
 python3 demo/make_demo_repo.py
@@ -233,8 +233,8 @@ Python test files run with pytest. JS/TS test files (`*.test.ts`,
   intent-test confirmation: level `high`, score floored at
   `VERIFY_CONFIRMED_FLOOR`, `score_note` `"raised: confirmed by branch test"`
   (or `"... by branch test and intent test"` when both layers confirm). The UI
-  labels it **Confirmed by branch test (existing tests, no LLM)**, separate
-  from **Confirmed by intent test (Nemotron)**.
+  labels it **Confirmed by branch test** (sublabel "no LLM"), separate
+  from **Confirmed by intent test** (sublabel "written by Nemotron").
 - `passed`: ran, no such test. `skipped`: no test files changed, or a textual
   merge conflict. `unsupported`: only test files that cannot run (JS/TS with
   no vitest/jest setup, no `node`, or `BRANCH_TESTS_JS_ENABLED=false`).
@@ -280,7 +280,7 @@ throwaway `git worktree`s:
 
 If a test fails on its own branch, or does not exercise the interaction,
 Nemotron gets a repair round with the real pytest output
-(`VERIFY_MAX_ATTEMPTS`, default 3 generations in total). If Nemotron's
+(`VERIFY_MAX_ATTEMPTS`; the Settings default is 4, and `.env.example` sets 3). If Nemotron's
 reasoning runs out of its token budget, the next attempt is made with
 reasoning turned off. The generated test, per-checkout pass/fail
 counts and per-test outcomes, trimmed pytest output, attempts, tokens and the
