@@ -1,7 +1,7 @@
 import type { DocSource } from '../types';
 
-/** How many Tavily sources a pair card lists. */
-export const MAX_DOCS = 3;
+/** How many Tavily sources a pair lists (the API demo returns 4 usable). */
+export const MAX_DOCS = 6;
 
 const httpUrl = (raw: unknown): URL | null => {
   if (typeof raw !== 'string') return null;

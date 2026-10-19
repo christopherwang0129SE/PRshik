@@ -49,23 +49,26 @@ describe('BranchTestDetails', () => {
   it('labels a branch-test confirmation separately from the intent test', () => {
     render(<BranchTestDetails branchTests={branchTests()} />)
     const badge = screen.getByText('Confirmed by branch test')
-    expect(badge).toHaveClass('badge-confirmed')
+    expect(badge).toHaveAttribute('data-tone', 'fail')
     expect(screen.queryByText(/intent test/)).toBeNull()
   })
 
   it('shows the failing test id and the error excerpt as evidence', () => {
     render(<BranchTestDetails branchTests={branchTests()} />)
     expect(screen.getByText('tests.test_report::test_report_uses_floor')).toBeInTheDocument()
-    expect(screen.getByLabelText('Branch tests failing on merge')).toHaveTextContent(
-      "feat/report's test: E AttributeError: 'tuple' object has no attribute 'get'"
-    )
+    const failures = screen.getByLabelText('Branch tests failing on merge')
+    expect(failures).toHaveTextContent("feat/report's test")
+    const excerpt = screen.getByRole('region', { name: 'Failure in tests.test_report::test_report_uses_floor' })
+    expect(excerpt).toHaveTextContent("E AttributeError: 'tuple' object has no attribute 'get'")
+    expect(excerpt.querySelector('[data-marked]')).not.toBeNull()
   })
 
   it('keeps per-checkout runs collapsed until expanded', () => {
     const { container } = render(<BranchTestDetails branchTests={branchTests()} />)
     const details = container.querySelector('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
-    fireEvent.click(screen.getByText('Branch test runs (3.2s)'))
+    expect(screen.getByText(/All runs/, { selector: 'summary' })).toHaveTextContent('All runs (3.2s)')
+    fireEvent.click(screen.getByText(/All runs/, { selector: 'summary' }))
     expect(details.open).toBe(true)
     expect(screen.getByText('Merge A+B').parentElement).toHaveTextContent('2 files): 2 passed, 1 failed')
   })
@@ -83,7 +86,7 @@ describe('BranchTestDetails', () => {
       build_s: 41.7,
     })
     render(<BranchTestDetails branchTests={js} />)
-    fireEvent.click(screen.getByText('Branch test runs (3.2s)'))
+    fireEvent.click(screen.getByText(/All runs/, { selector: 'summary' }))
     const items = screen.getAllByText('Merge A+B').map((el) => el.parentElement)
     expect(items[0]).toHaveTextContent('vitest in packages/bridge, 1 file): 565 passed, 1 failed')
     expect(items[1]).toHaveTextContent('no results: JS setup failed: no lockfile')
@@ -92,15 +95,15 @@ describe('BranchTestDetails', () => {
     )
   })
 
-  it('shows a neutral badge when the branch tests pass on the merge', () => {
+  it('shows a pass status when the branch tests pass on the merge', () => {
     render(<BranchTestDetails branchTests={branchTests({ status: 'passed', confirming: [] })} />)
-    expect(screen.getByText('Branch tests pass on merge')).not.toHaveClass('badge-confirmed')
+    expect(screen.getByText('Branch tests pass on merge')).toHaveAttribute('data-tone', 'pass')
     expect(screen.queryByLabelText('Branch tests failing on merge')).toBeNull()
   })
 
   it('gives a branch-test-only pair the confirmed row edge', () => {
     const { container } = render(
-      <PairList pairs={[pair({ branch_tests: branchTests() })]} risk_model={null} />
+      <PairList pairs={[pair({ branch_tests: branchTests() })]} />
     )
     expect(screen.getAllByTestId('branch-tests')).toHaveLength(1)
     expect(screen.queryByTestId('verification')).toBeNull()
@@ -111,7 +114,7 @@ describe('BranchTestDetails', () => {
     const { container } = render(
       <PairList
         pairs={[pair({ score: 20, level: 'low', branch_tests: branchTests({ status: 'passed', confirming: [] }) })]}
-        risk_model={null}
+       
       />
     )
     expect(container.querySelector('.pair-confirmed')).toBeNull()

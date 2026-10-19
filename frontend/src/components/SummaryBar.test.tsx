@@ -154,7 +154,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(screen.getByText('1 hidden conflict among 3 pairs')).toBeInTheDocument()
-    expect(screen.getByTestId('summary-bar').style.getPropertyValue('--verdict-color')).toBe('#f59e0b')
+    expect(screen.getByTestId('summary-bar')).toHaveAttribute('data-level', 'medium')
   })
 
   it('pluralizes hidden conflicts', () => {
@@ -199,7 +199,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(screen.getByText('1 hidden conflict among 2 pairs')).toBeInTheDocument()
-    expect(screen.getByTestId('summary-bar').style.getPropertyValue('--verdict-color')).toBe('#ef4444')
+    expect(screen.getByTestId('summary-bar')).toHaveAttribute('data-level', 'high')
   })
 
   it('appends the hidden count when shown medium/high pairs exist', () => {
@@ -227,7 +227,7 @@ describe('SummaryBar', () => {
     ]
     render(<SummaryBar pairs={pairs} />)
     expect(
-      screen.getByText('2 of 3 branch pairs at medium risk · 1 hidden')
+      screen.getByText('2 of 3 branch pairs at medium risk, 1 hidden')
     ).toBeInTheDocument()
   })
 })
@@ -255,9 +255,21 @@ const usage = (extra: Partial<UsageSummary> = {}): UsageSummary => ({
 describe('SummaryBar usage', () => {
   it('shows tokens and estimated cost in the summary bar', () => {
     render(<SummaryBar pairs={[pair('a', 'b', 50, 'medium')]} usage={usage()} />)
-    expect(screen.getByTestId('summary-usage')).toHaveTextContent(
-      '1 LLM call · 1,558 tokens · $0.0007 est. · 2 filtered before LLM'
-    )
+    const block = screen.getByTestId('summary-usage')
+    const value = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling
+    expect(value('LLM calls')).toHaveTextContent('1')
+    expect(value('Tokens')).toHaveTextContent('1,558')
+    expect(value('Cost')).toHaveTextContent('$0.0007 est.')
+    expect(value('Filtered before LLM')).toHaveTextContent('2')
+    expect(value('Time')).toHaveTextContent('3.0s')
+    // No cache hits: no Cached field; no dotted chain.
+    expect(screen.queryByText('Cached', { selector: 'dt' })).toBeNull()
+    expect(block.textContent).not.toContain('·')
+  })
+
+  it('lists cache hits as their own usage field', () => {
+    render(<SummaryBar pairs={[pair('a', 'b', 50, 'medium')]} usage={usage({ cache_hits: 2 })} />)
+    expect(screen.getByText('Cached', { selector: 'dt' }).nextElementSibling).toHaveTextContent('2')
   })
 
   it('shows cache hits and zero cost on a cached re-run', () => {
@@ -316,7 +328,7 @@ describe('SummaryBar confirmed by test', () => {
       <SummaryBar pairs={[confirmedPair, docs('feat/discount-cap'), docs('feat/tax-before-discount')]} />
     )
     expect(
-      screen.getByText('1 of 3 branch pairs at high risk · 1 confirmed by test · 1 hidden')
+      screen.getByText('1 of 3 branch pairs at high risk, 1 confirmed by test, 1 hidden')
     ).toBeInTheDocument()
   })
 
@@ -345,8 +357,24 @@ describe('SummaryBar confirmed by test', () => {
     })
     render(<SummaryBar pairs={[branchOnly, docs('feat/tuple')]} />)
     expect(
-      screen.getByText('1 of 2 branch pairs at high risk · 1 confirmed by test (1 by branch test)')
+      screen.getByText('1 of 2 branch pairs at high risk, 1 confirmed by test (1 by branch test)')
     ).toBeInTheDocument()
+  })
+
+  it('shows the run facts, branch levels and model when given', () => {
+    render(
+      <SummaryBar
+        pairs={[pair('a', 'b', 80, 'high')]}
+        branches={['a', 'b', 'c']}
+        facts={['Diffed 3 branches.', 'Reviewed 1 pair.', 'Tested 1 pair: none failed.']}
+        riskModel="nvidia/nemotron"
+      />
+    )
+    expect(screen.getByText('Diffed 3 branches.', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText('Tested 1 pair: none failed.')).toBeInTheDocument()
+    expect(screen.getByText('nvidia/nemotron')).toBeInTheDocument()
+    const branches = screen.getByRole('list', { name: 'Branches by risk' })
+    expect(branches.querySelectorAll('li')).toHaveLength(3)
   })
 
   it('leads with a verdict heading above the counts', () => {

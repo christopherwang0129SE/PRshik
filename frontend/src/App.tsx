@@ -3,12 +3,11 @@ import type { AnalyzeRequest, AnalyzeResponse, HealthResponse } from './types';
 import { analyzeRepo, checkHealth, API_BASE_URL } from './services/api';
 import { classifyRepoInput } from './utils/repo';
 import { describeError, BACKEND_START_COMMAND } from './utils/errors';
-import { noTestsRan, pipelineFacts, verdictFor } from './utils/verdict';
-import { BranchLights } from './components/BranchLights';
+import { pipelineFacts, verdictFor } from './utils/verdict';
 import { PairList } from './components/PairList';
 import { SummaryBar } from './components/SummaryBar';
 import { AgentStatus } from './components/AgentStatus';
-import { Pipeline } from './components/Pipeline';
+import { Progress } from './components/Progress';
 import { STEPS, estimatedStep } from './utils/pipeline';
 import { ErrorPanel } from './components/ErrorPanel';
 import './App.css';
@@ -17,16 +16,6 @@ import './App.css';
 // An empty string hides that button.
 const DEMO_REPO_PATH: string = import.meta.env.VITE_DEMO_REPO_PATH ?? '';
 const API_DEMO_REPO_PATH: string = import.meta.env.VITE_API_DEMO_REPO_PATH ?? '';
-
-const Logo = () => (
-  <svg className="logo" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
-    <path d="M9 4v24" />
-    <path d="M23 4v6c0 6-14 6-14 13" />
-    <circle cx="9" cy="6" r="2.6" />
-    <circle cx="23" cy="6" r="2.6" />
-    <circle cx="9" cy="26" r="3.2" className="logo-merge" />
-  </svg>
-);
 
 function App() {
   const [repoInput, setRepoInput] = useState('');
@@ -39,6 +28,8 @@ function App() {
   const [healthChecked, setHealthChecked] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [announcement, setAnnouncement] = useState('');
+  // What the running analysis is looking at, for the progress line.
+  const [runTarget, setRunTarget] = useState({ repo: '', base: 'main' });
 
   const repoRef = useRef<HTMLInputElement>(null);
   const verdictRef = useRef<HTMLHeadingElement>(null);
@@ -86,8 +77,7 @@ function App() {
     }
   }, [loading, activeStep]);
 
-  // On a phone the progress sits below the form: bring it into view. A no-op
-  // on wide screens, where it is already beside the form.
+  // On a phone the progress can sit below the fold: bring it into view.
   useEffect(() => {
     if (!loading) return;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -114,6 +104,7 @@ function App() {
       base_branch: baseBranch.trim() || 'main',
     };
     const id = ++requestId.current;
+    setRunTarget({ repo: repo.trim(), base: request.base_branch ?? 'main' });
     setFieldError(null);
     setError(null);
     setResponse(null);
@@ -148,146 +139,139 @@ function App() {
   };
 
   const backendOffline = healthChecked && !health;
-  const mode = loading ? 'running' : response ? 'done' : 'intro';
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
   const hasDemo = Boolean(DEMO_REPO_PATH || API_DEMO_REPO_PATH);
 
   return (
     <div className="app">
-      <header className="app-header">
-        <div className="container header-row">
-          <a className="brand" href="/" aria-label="MergeGuard home">
-            <Logo />
-            <span className="brand-name">MergeGuard</span>
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <a className="wordmark" href="/">
+            MergeGuard
           </a>
           <AgentStatus health={health} checked={healthChecked} />
         </div>
       </header>
 
-      <main className="container" id="main">
-        <div className="hero">
-          <div className="hero-main">
-            <h1>Catch the merge conflicts git can&apos;t see</h1>
-            <p className="lede">
-              Two branches can merge without a single conflict marker and still break each other.
-              MergeGuard checks every pair of open branches before you merge, and proves the risky
-              ones by running tests on the merged code.
-            </p>
+      <main className="page" id="main" tabIndex={-1}>
+        <section className="intro" aria-labelledby="intro-heading">
+          <h1 id="intro-heading">Check branches for conflicts before merging</h1>
+          <p className="intro-text">
+            MergeGuard diffs every branch against the base, asks Nemotron to explain pairs that change related
+            code, and runs tests on the merged result to prove conflicts that git merges without a marker.
+          </p>
 
-            <div className="start-card">
-              {hasDemo && (
-                <div className="demo-rows">
-                  {DEMO_REPO_PATH && (
-                    <div className="demo-row">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-demo"
-                        onClick={() => handleTryDemo(DEMO_REPO_PATH)}
-                        disabled={loading}
-                        aria-describedby="demo-note"
-                      >
-                        Try demo repo
-                      </button>
-                      <p className="demo-note" id="demo-note">
-                        A small checkout service with three branches. Two of them change how discounts and
-                        tax combine, and git merges them cleanly.
-                      </p>
-                    </div>
-                  )}
-                  {API_DEMO_REPO_PATH && (
-                    <div className="demo-row">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-demo"
-                        onClick={() => handleTryDemo(API_DEMO_REPO_PATH)}
-                        disabled={loading}
-                        aria-describedby="api-demo-note"
-                      >
-                        Try API demo (Tavily)
-                      </button>
-                      <p className="demo-note" id="api-demo-note">
-                        A requests client and a pydantic model. Two branches disagree on cents versus
-                        dollars, so Tavily looks up the library docs.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="input-form" noValidate aria-labelledby="own-repo-heading">
-                <h2 id="own-repo-heading" className="form-heading">
-                  {hasDemo ? 'Or analyze your own repository' : 'Analyze a repository'}
-                </h2>
-                <div className="field field-repo">
-                  <label htmlFor="repo-input">Repository path or URL</label>
-                  <input
-                    id="repo-input"
-                    ref={repoRef}
-                    type="text"
-                    name="repo"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="/path/to/repo or https://github.com/org/repo.git"
-                    value={repoInput}
-                    aria-invalid={fieldError ? true : undefined}
-                    aria-describedby={fieldError ? 'repo-error' : undefined}
-                    onChange={(e) => {
-                      setRepoInput(e.target.value);
-                      if (fieldError) setFieldError(null);
-                    }}
-                  />
-                  {fieldError && (
-                    <p className="field-error" id="repo-error">
-                      {fieldError}
-                    </p>
-                  )}
-                </div>
-                <div className="field field-base">
-                  <label htmlFor="base-input">Base branch</label>
-                  <input
-                    id="base-input"
-                    type="text"
-                    name="base-branch"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="main"
-                    value={baseBranch}
-                    onChange={(e) => setBaseBranch(e.target.value)}
-                  />
-                </div>
-                <button type="submit" className="btn btn-secondary btn-analyze" disabled={loading}>
-                  {loading ? 'Analyzing…' : 'Analyze'}
-                </button>
-              </form>
-            </div>
-
-            {errorHelp && !loading && (
-              <ErrorPanel ref={errorRef} help={errorHelp} onRetry={() => runAnalysis(repoInput)} />
-            )}
-
-            {backendOffline && !error && (
-              <div className="offline-note">
-                <p>
-                  <strong>The backend isn&apos;t answering</strong> at {API_BASE_URL}. Start it from the
-                  repository root:
+          <form onSubmit={handleSubmit} className="repo-form" noValidate aria-label="Analyze a repository">
+            <div className="field field-repo">
+              <label htmlFor="repo-input">Repository path or URL</label>
+              <input
+                id="repo-input"
+                ref={repoRef}
+                type="text"
+                name="repo"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="/path/to/repo or https://github.com/org/repo.git"
+                value={repoInput}
+                aria-invalid={fieldError ? true : undefined}
+                aria-describedby={fieldError ? 'repo-error' : undefined}
+                onChange={(e) => {
+                  setRepoInput(e.target.value);
+                  if (fieldError) setFieldError(null);
+                }}
+              />
+              {fieldError && (
+                <p className="field-error" id="repo-error">
+                  {fieldError}
                 </p>
-                <pre className="command">
-                  <code>{BACKEND_START_COMMAND}</code>
-                </pre>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+            <div className="field field-base">
+              <label htmlFor="base-input">Base branch</label>
+              <input
+                id="base-input"
+                type="text"
+                name="base-branch"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="main"
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Analyzing…' : 'Analyze'}
+            </button>
+          </form>
 
-          <div className="hero-side" aria-busy={loading} ref={progressRef}>
-            <Pipeline
-              mode={mode}
-              activeStep={activeStep}
-              elapsedS={elapsed}
-              facts={response ? pipelineFacts(response) : undefined}
-              testsSkipped={response ? noTestsRan(response.pairs) : false}
-            />
-          </div>
+          {hasDemo && (
+            <div className="demos" role="group" aria-labelledby="demos-label">
+              <p id="demos-label" className="demos-label">
+                Or run a bundled demo
+              </p>
+              <ul className="demo-list">
+                {DEMO_REPO_PATH && (
+                  <li>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => handleTryDemo(DEMO_REPO_PATH)}
+                      disabled={loading}
+                      aria-describedby="demo-note"
+                    >
+                      Try demo repo
+                    </button>
+                    <span className="demo-note" id="demo-note">
+                      Checkout service. Two branches change how discount and tax combine; git merges them cleanly.
+                    </span>
+                  </li>
+                )}
+                {API_DEMO_REPO_PATH && (
+                  <li>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => handleTryDemo(API_DEMO_REPO_PATH)}
+                      disabled={loading}
+                      aria-describedby="api-demo-note"
+                    >
+                      Try API demo (Tavily)
+                    </button>
+                    <span className="demo-note" id="api-demo-note">
+                      requests client and pydantic model. Two branches disagree on cents versus dollars; Tavily
+                      looks up the library docs.
+                    </span>
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          {backendOffline && !error && (
+            <div className="problem problem-quiet">
+              <p>
+                <strong>The backend isn&apos;t answering</strong> at <code>{API_BASE_URL}</code>. Start it from the
+                repository root:
+              </p>
+              <pre className="code command" role="region" tabIndex={0} aria-label="Command to start the backend">
+                <code>{BACKEND_START_COMMAND}</code>
+              </pre>
+            </div>
+          )}
+        </section>
+
+        <div ref={progressRef}>
+          {loading && (
+            <Progress target={runTarget.repo} baseBranch={runTarget.base} activeStep={activeStep} elapsedS={elapsed} />
+          )}
         </div>
+
+        {errorHelp && !loading && (
+          <ErrorPanel ref={errorRef} help={errorHelp} onRetry={() => runAnalysis(repoInput)} />
+        )}
 
         <p className="sr-only" role="status" aria-live="polite">
           {announcement}
@@ -295,20 +279,24 @@ function App() {
 
         {response && !loading && (
           <div className="results">
-            <SummaryBar pairs={response.pairs} usage={response.usage ?? null} headingRef={verdictRef} />
-            <BranchLights branches={response.branches} pairs={response.pairs} />
-            <PairList pairs={response.pairs} risk_model={response.risk_model ?? null} />
+            <SummaryBar
+              pairs={response.pairs}
+              usage={response.usage ?? null}
+              headingRef={verdictRef}
+              branches={response.branches}
+              facts={pipelineFacts(response)}
+              riskModel={response.risk_model ?? null}
+            />
+            <PairList pairs={response.pairs} />
           </div>
         )}
       </main>
 
-      <footer className="app-footer">
-        <div className="container">
-          <p>
-            Explanations by NVIDIA Nemotron 3 Super on Nebius Token Factory, grounded with Tavily
-            search. Planner and Merger agents are on the roadmap.
-          </p>
-        </div>
+      <footer className="footer">
+        <p>
+          Explanations by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from Tavily search. API at{' '}
+          <code>{API_BASE_URL}</code>.
+        </p>
       </footer>
     </div>
   );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { VerificationDetails } from './VerificationDetails'
 import { confirmingRuns } from '../utils/verification'
 import { PairList } from './PairList'
@@ -47,20 +47,24 @@ const pair = (extra: Partial<PairRisk> = {}): PairRisk => ({
 })
 
 describe('VerificationDetails', () => {
-  it('shows a Confirmed by intent test badge for a confirmed pair', () => {
+  it('marks a confirmed intent test with the failure tone', () => {
     render(<VerificationDetails verification={verification()} />)
-    expect(screen.getByText('Confirmed by intent test')).toHaveClass('badge-confirmed')
+    expect(screen.getByText('Confirmed by intent test')).toHaveAttribute('data-tone', 'fail')
   })
 
   it('keeps the generated test collapsed until expanded', () => {
     const { container } = render(<VerificationDetails verification={verification()} />)
     const details = container.querySelector('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
-    fireEvent.click(screen.getByText(/Generated test \(1 attempt, 21.3s\)/))
+    const summary = screen.getByText(/Generated test/, { selector: 'summary' })
+    expect(summary).toHaveTextContent('Generated test (1 attempt, 21.3s)')
+    fireEvent.click(summary)
     expect(details.open).toBe(true)
-    expect(container.querySelector('pre code')?.textContent).toBe(CODE)
+    // Line numbers come from CSS counters: the code text stays exact for copy.
+    const code = screen.getByRole('region', { hidden: true, name: 'Generated test code' }) ?? null
+    expect(code.querySelector('code')?.textContent).toBe(CODE)
     expect(screen.getByText(/Merge A\+B/).parentElement).toHaveTextContent('1 passed, 1 failed')
-    expect(screen.getByText('Fails on merge: test_branch_a_cap')).toBeInTheDocument()
+    expect(screen.getByText(/Fails on merge:/)).toHaveTextContent('Fails on merge: test_branch_a_cap')
   })
 
   it('labels suspected and skipped results without the confirmed badge', () => {
@@ -80,7 +84,7 @@ describe('VerificationDetails', () => {
     render(
       <PairList
         pairs={[pair({ verification: verification() }), pair({ branch_b: 'docs/readme', score: 0, level: 'none', verification: null })]}
-        risk_model="nvidia/nemotron-3-super-120b-a12b"
+       
       />
     )
     expect(screen.getAllByTestId('verification')).toHaveLength(1)
@@ -101,15 +105,14 @@ describe('VerificationDetails', () => {
             verification: verification(),
           }),
         ]}
-        risk_model={null}
+       
       />
     )
-    expect(screen.getByText('Risk 90 / 100')).toBeInTheDocument()
-    expect(screen.getByText('High')).toBeInTheDocument()
+    expect(screen.getByTestId('pair-score')).toHaveTextContent('90/100, High')
     expect(screen.getByTestId('score-note')).toHaveTextContent('raised: confirmed by test (blend 48)')
     // Git and model columns stay as reported.
-    expect(screen.getByText('10')).toBeInTheDocument()
-    expect(screen.getByText('85')).toBeInTheDocument()
+    expect(screen.getByTestId('git-score')).toHaveTextContent('10')
+    expect(screen.getByTestId('model-score')).toHaveTextContent('85')
     // Confirmed/High uses the red edge, not the amber hidden-conflict edge.
     const row = container.querySelector('[data-testid="pair-card"]')
     expect(row!.classList.contains('pair-confirmed')).toBe(true)
@@ -120,11 +123,11 @@ describe('VerificationDetails', () => {
     render(
       <PairList
         pairs={[pair({ verification: verification({ status: 'suspected' }) })]}
-        risk_model={null}
+       
       />
     )
     expect(screen.queryByTestId('score-note')).toBeNull()
-    expect(screen.getByText('Medium')).toBeInTheDocument()
+    expect(screen.getByTestId('pair-score')).toHaveTextContent('Medium')
   })
 
   it('adds confirmed-by-test counts to the usage line', () => {
@@ -155,9 +158,51 @@ describe('intent test proof strip', () => {
       ['merge', 0, 1],
     ])
     render(<VerificationDetails verification={v} />)
-    const strip = screen.getByRole('list', { name: 'Test results per checkout' })
-    expect(strip).toHaveTextContent('On feat/a1 passed')
-    expect(strip).toHaveTextContent('On the merge1 failed')
-    expect(strip).not.toHaveTextContent('feat/b')
+    const table = screen.getByRole('table', { name: 'Intent test results per checkout' })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual(['Afeat/a1 passed', 'A+Bmerged1 failed'])
+    expect(rows[0]).toHaveAttribute('data-outcome', 'pass')
+    expect(rows[1]).toHaveAttribute('data-outcome', 'fail')
+    expect(table).not.toHaveTextContent('feat/b')
+  })
+})
+
+describe('intent test failure evidence', () => {
+  const OUTPUT = [
+    'F [100%]',
+    '=================================== FAILURES ===================================',
+    '___________ test_branch_a_cap ___________',
+    '    def test_branch_a_cap():',
+    '>       assert checkout.total(20.0, 10, 50.0, 10.0) == 198.0',
+    'E       assert 200.0 == 198.0',
+    '',
+    'test_mergeguard_intent.py:4: AssertionError',
+    '1 failed in 0.1s',
+  ].join('\n')
+
+  const withOutput = () =>
+    verification({
+      test_path: '/tmp/verify/test_mergeguard_intent.py',
+      runs: verification().runs.map((run) =>
+        run.target === 'merge' ? { ...run, output: OUTPUT, failure_lines: { test_branch_a_cap: 4 } } : run
+      ),
+    })
+
+  it('shows the failing assertion from the merge run without expanding anything', () => {
+    render(<VerificationDetails verification={withOutput()} />)
+    const excerpt = screen.getByRole('region', { name: 'Failure in test_branch_a_cap on the merge' })
+    expect(excerpt.closest('details')).toBeNull()
+    expect(excerpt).toHaveTextContent('E assert 200.0 == 198.0')
+    expect(excerpt).toHaveTextContent('test_mergeguard_intent.py:4: AssertionError')
+    expect(excerpt.querySelectorAll('[data-marked]')).toHaveLength(2)
+  })
+
+  it('names the generated test file and marks its failing line', () => {
+    render(<VerificationDetails verification={withOutput()} />)
+    expect(screen.getByText(/Generated test/, { selector: 'summary' })).toHaveTextContent('test_mergeguard_intent.py')
+    const code = screen.getByRole('region', { hidden: true, name: 'Generated test code' })
+    const lines = [...code.querySelectorAll('.code-line')]
+    expect(lines[3]).toHaveAttribute('data-marked')
+    expect(lines.filter((l) => l.hasAttribute('data-marked'))).toHaveLength(1)
   })
 })

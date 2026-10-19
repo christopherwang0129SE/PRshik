@@ -1,19 +1,18 @@
-import type { DocSource, Verification, VerifyRun } from '../types';
-import { ProofStrip } from './ProofStrip';
+import type { Verification, VerifyRun } from '../types';
 import { confirmingRuns } from '../utils/verification';
-import { DocsSources } from './DocsSources';
+import { failureExcerpts } from '../utils/evidence';
+import { CodeBlock } from './CodeBlock';
+import { ProofTable } from './ProofTable';
 
 interface VerificationDetailsProps {
   verification: Verification;
-  /** Docs the pair card already lists; not repeated here. */
-  pairDocs?: DocSource[];
 }
 
-const BADGE: Record<Verification['status'], { label: string; className: string }> = {
-  confirmed: { label: 'Confirmed by intent test', className: 'badge badge-confirmed' },
-  suspected: { label: 'Suspected: intent test inconclusive', className: 'badge badge-suspected' },
-  error: { label: 'Intent test error', className: 'badge badge-suspected' },
-  skipped: { label: 'Intent test skipped', className: 'badge badge-neutral' },
+const STATUS: Record<Verification['status'], { label: string; tone: 'fail' | 'neutral' | 'warn' }> = {
+  confirmed: { label: 'Confirmed by intent test', tone: 'fail' },
+  suspected: { label: 'Suspected: intent test inconclusive', tone: 'warn' },
+  error: { label: 'Intent test error', tone: 'warn' },
+  skipped: { label: 'Intent test skipped', tone: 'neutral' },
 };
 
 const TARGET_LABEL: Record<VerifyRun['target'], string> = {
@@ -34,38 +33,78 @@ const runSummary = (run: VerifyRun): string => {
 };
 
 /**
- * Nemotron intent-test (verify-by-test) result for one pair: a status badge,
- * the pass/pass/fail proof, and an expandable section with the generated
- * pytest test and the per-checkout outcomes.
+ * Nemotron intent-test (verify-by-test) result for one pair: the status, the
+ * pass/pass/fail proof, the assertion that failed on the merge, and the
+ * generated test with the failing lines marked.
  */
-export const VerificationDetails = ({ verification, pairDocs }: VerificationDetailsProps) => {
-  const shown = new Set((pairDocs ?? []).map((source) => source.url));
-  const badge = BADGE[verification.status];
-  const confirmed = verification.status === 'confirmed';
+export const VerificationDetails = ({ verification }: VerificationDetailsProps) => {
+  const status = STATUS[verification.status];
+  const confirming = verification.confirming_tests ?? [];
+  const merge = verification.runs.find((run) => run.target === 'merge');
+  const excerpts = failureExcerpts(merge?.output).filter(
+    (excerpt) => confirming.length === 0 || confirming.includes(excerpt.test)
+  );
+  const failingLines = confirming
+    .map((name) => merge?.failure_lines?.[name])
+    .filter((line): line is number => typeof line === 'number');
+  const fileName = verification.test_path?.split('/').pop();
+
   return (
-    <section className="evidence" data-status={verification.status} data-testid="verification">
-      <div className="evidence-head">
-        <h4>Intent tests written by Nemotron</h4>
-        <span className={badge.className}>{badge.label}</span>
-      </div>
-      <p className="evidence-what">
-        A test for what each branch meant to do, kept only if it passes on that branch, then run on the merge.
-      </p>
-      <p className="evidence-reason">{verification.reason}</p>
-      {confirmed && <ProofStrip runs={confirmingRuns(verification)} />}
-      {verification.confirming_tests && verification.confirming_tests.length > 0 && (
-        <p className="failing-inline">
-          Fails on merge: {verification.confirming_tests.join(', ')}
+    <section className="fact" data-status={verification.status} data-testid="verification">
+      <h4 className="fact-label">
+        Intent tests
+        <span className="fact-sub">written by Nemotron</span>
+      </h4>
+      <div className="fact-body">
+        <p className="status-line">
+          <span className="status" data-tone={status.tone}>
+            {status.label}
+          </span>
+          <span className="status-reason">{verification.reason}</span>
         </p>
-      )}
-      {verification.test_code && (
-        <details className="disclosure">
-          <summary>
-            Generated test ({verification.attempts} attempt
-            {verification.attempts === 1 ? '' : 's'}
-            {verification.cached_test ? ', cached' : ''}, {verification.duration_s.toFixed(1)}s)
-          </summary>
-          {verification.runs.length > 0 && (
+        {verification.status === 'confirmed' && (
+          <ProofTable runs={confirmingRuns(verification)} label="Intent test results per checkout" />
+        )}
+        {confirming.length > 0 && (
+          <p className="fails-on-merge">
+            Fails on merge:{' '}
+            {confirming.map((name, index) => (
+              <span key={name}>
+                {index > 0 && ', '}
+                <code className="test-id">{name}</code>
+              </span>
+            ))}
+          </p>
+        )}
+        {excerpts.map((excerpt) => (
+          <CodeBlock
+            key={excerpt.test}
+            code={excerpt.lines.join('\n')}
+            label={`Failure in ${excerpt.test} on the merge`}
+            markFailures
+          />
+        ))}
+        {verification.test_code && (
+          <details className="more">
+            <summary>
+              Generated test
+              {fileName && (
+                <>
+                  {' '}
+                  <code>{fileName}</code>
+                </>
+              )}{' '}
+              <span className="tabular">
+                ({verification.attempts} attempt{verification.attempts === 1 ? '' : 's'}
+                {verification.cached_test ? ', cached' : ''}, {verification.duration_s.toFixed(1)}s)
+              </span>
+            </summary>
+            <CodeBlock code={verification.test_code} label="Generated test code" numbered marked={failingLines} />
+          </details>
+        )}
+        {verification.runs.length > 0 && (
+          <details className="more">
+            <summary>All runs</summary>
             <ul className="run-list">
               {verification.runs.map((run) => (
                 <li key={run.target}>
@@ -73,14 +112,11 @@ export const VerificationDetails = ({ verification, pairDocs }: VerificationDeta
                 </li>
               ))}
             </ul>
-          )}
-          <pre className="code-block" tabIndex={0} aria-label="Generated test code">
-            <code>{verification.test_code}</code>
-          </pre>
-          {verification.sandbox && <p className="run-note">Sandbox: {verification.sandbox}</p>}
-        </details>
-      )}
-      <DocsSources sources={verification.docs_sources?.filter((source) => !shown.has(source.url))} />
+            {merge?.output && <CodeBlock code={merge.output} label="Test output on the merge" markFailures />}
+            {verification.sandbox && <p className="more-note">Sandbox: {verification.sandbox}</p>}
+          </details>
+        )}
+      </div>
     </section>
   );
 };

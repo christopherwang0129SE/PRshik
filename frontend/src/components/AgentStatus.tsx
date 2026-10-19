@@ -9,31 +9,28 @@ interface AgentStatusProps {
 
 /**
  * Header status for the backend: Sentinel online or offline (from
- * /api/health), the scoring mode, and the model id.
+ * /api/health), the scoring mode, the model id and whether Tavily is on.
  */
 export const AgentStatus = ({ health, checked = true }: AgentStatusProps) => {
   const status = !checked ? 'checking' : sentinelStatus(health);
   const mode = sentinelMode(health);
 
   return (
-    <div className="agent-status" data-status={status}>
-      <span className="status-dot" aria-hidden="true"></span>
-      <span className="agent-name">
-        {status === 'checking'
-          ? 'Checking backend'
-          : status === 'online'
-            ? 'Sentinel online'
-            : 'Sentinel offline'}
+    <div className="backend" data-status={status}>
+      <span className="backend-state">
+        <span className="backend-mark" aria-hidden="true"></span>
+        {status === 'checking' ? 'Checking backend' : status === 'online' ? 'Sentinel online' : 'Sentinel offline'}
       </span>
       {status === 'online' && (
-        <span className="agent-mode">
-          {mode}
+        <>
+          <span className="backend-mode">{mode}</span>
           {health?.nebius_model && (
-            <span className="agent-model" title={health.nebius_model}>
+            <span className="backend-model" title={health.nebius_model}>
               {health.nebius_model}
             </span>
           )}
-        </span>
+          {health?.tavily_ready && <span className="backend-extra">Tavily on</span>}
+        </>
       )}
     </div>
   );

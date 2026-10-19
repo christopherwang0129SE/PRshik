@@ -80,17 +80,60 @@ describe('App', () => {
     vi.unstubAllGlobals();
   });
 
-  it('explains the product on the first screen', async () => {
+  it('shows a compact first screen: one-line description, the form and both demos', async () => {
     routeFetch(fetchMock, () => Promise.resolve(jsonResponse(RESULT)));
     render(<App />);
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/merge conflicts git can't see/i);
-    expect(screen.getByRole('heading', { name: 'How it works' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Sentinel diffs every branch' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Nemotron explains the risk' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Tests prove it' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try demo repo' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try API demo (Tavily)' })).toBeInTheDocument();
+    expect(screen.getByRole('banner')).toHaveTextContent('MergeGuard');
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#main');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Check branches for conflicts before merging');
+    expect(screen.getByText(/runs tests on the merged result/)).toBeInTheDocument();
+    // No marketing hero, no three-step explainer.
+    expect(screen.queryByText(/git can't see/i)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'How it works' })).toBeNull();
+    expect(screen.getByRole('form', { name: 'Analyze a repository' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Base branch')).toHaveValue('main');
+    expect(screen.getByRole('button', { name: 'Analyze' })).toHaveClass('btn-primary');
+    expect(screen.getByRole('button', { name: 'Try demo repo' })).toHaveAccessibleDescription(/discount and tax/);
+    expect(screen.getByRole('button', { name: 'Try API demo (Tavily)' })).toHaveAccessibleDescription(/Tavily/);
     expect(await screen.findByText('Sentinel online')).toBeInTheDocument();
+    expect(screen.getByText('git+Nemotron')).toBeInTheDocument();
+    expect(screen.getByText('nvidia/nemotron')).toBeInTheDocument();
+  });
+
+  it('shows inline progress with the target, the estimated stage and elapsed time', async () => {
+    let resolve: (r: Response) => void = () => {};
+    routeFetch(fetchMock, () => new Promise<Response>((r) => (resolve = r)));
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Repository path or URL'), { target: { value: '/tmp/repo' } });
+    fireEvent.change(screen.getByLabelText('Base branch'), { target: { value: 'develop' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+
+    const progress = screen.getByRole('region', { name: 'Analyzing' });
+    expect(progress).toHaveAttribute('aria-busy', 'true');
+    expect(progress).toHaveTextContent('/tmp/repo against develop');
+    expect(progress).toHaveTextContent('0s elapsed');
+    expect(progress).toHaveTextContent('Sentinel is diffing every branch');
+    expect(progress).toHaveTextContent(/estimated/);
+    expect(screen.getByRole('button', { name: 'Analyzing…' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Sentinel is diffing every branch.');
+
+    resolve(jsonResponse(RESULT));
+    await screen.findByRole('heading', { name: '1 hidden conflict proven by tests' });
+    expect(screen.queryByRole('region', { name: 'Analyzing' })).toBeNull();
+  });
+
+  it('orders the results: verdict, then the risky pair with its evidence', async () => {
+    routeFetch(fetchMock, () => Promise.resolve(jsonResponse(RESULT)));
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Try demo repo' }));
+    const verdict = await screen.findByRole('heading', { name: '1 hidden conflict proven by tests' });
+    const pairHeading = screen.getByRole('heading', { level: 3, name: /feat\/discount-cap\s+and\s+feat\/tax-before-discount/ });
+    expect(verdict.compareDocumentPosition(pairHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('nvidia/nemotron', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('Tested 1 pair on the merged code: 1 proven.')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Failure in t::a' })).toHaveTextContent('200 != 198');
   });
 
   it('fills the repo field with the demo path and runs the analysis on "Try demo repo"', async () => {
@@ -101,8 +144,9 @@ describe('App', () => {
 
     const input = screen.getByLabelText('Repository path or URL') as HTMLInputElement;
     expect(input.value).toBe(expectedDemoPath);
-    // Progress is shown while the request runs.
+    // Progress is shown inline while the request runs.
     expect(screen.getByRole('heading', { name: 'Analyzing' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Analyzing' })).toHaveTextContent(expectedDemoPath);
 
     const verdict = await screen.findByRole('heading', { name: '1 hidden conflict proven by tests' });
     expect(verdict).toHaveFocus();
