@@ -16,6 +16,35 @@ from app.services import git_service, github_service, sentinel, verifier
 
 router = APIRouter()
 
+# Directory names under verifier.DEMO_ROOT. The hosted image generates both.
+_DEMO_REPO_NAMES = ("checkout-demo", "api-demo")
+
+
+def bundled_demo_repos() -> list[Path]:
+    """Absolute paths of the two repos the public demo may analyze."""
+    root = verifier.DEMO_ROOT
+    return [(root / name).resolve() for name in _DEMO_REPO_NAMES]
+
+
+def _demo_mode_guard(req: AnalyzeRequest) -> None:
+    """Refuse anything except the bundled demos before a path is opened or cloned."""
+    if not settings.demo_mode:
+        return
+    allowed = bundled_demo_repos()
+    detail = (
+        "Demo mode only analyzes the bundled demo repositories "
+        f"({', '.join(str(path) for path in allowed)}). "
+        "repo_url and other paths are not allowed."
+    )
+    if req.repo_url or not (req.repo_path and req.repo_path.strip()):
+        raise HTTPException(403, detail)
+    try:
+        repo = Path(req.repo_path).expanduser().resolve()
+    except OSError as exc:
+        raise HTTPException(403, detail) from exc
+    if repo not in allowed:
+        raise HTTPException(403, detail)
+
 
 @router.get("/health")
 def health() -> dict:
@@ -49,6 +78,7 @@ def _resolve_repo(req: AnalyzeRequest) -> Path:
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
+    _demo_mode_guard(req)
     repo = _resolve_repo(req)
     base = req.base_branch or settings.default_base_branch
 

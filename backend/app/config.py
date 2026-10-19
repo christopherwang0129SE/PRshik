@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     default_base_branch: str = "main"
     # Where cloned demo repos are cached.
     workspace_dir: str = ".workspace"
+    # Comma-separated browser origins. Default is the local Vite server.
+    # Read once, when the process starts.
+    cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Optional regex matched against the whole Origin header. Empty disables it.
+    # Starlette uses a full match. Example for Vercel previews:
+    # https://mergeguard-demo.*\.vercel\.app
+    cors_allow_origin_regex: str = ""
+    # Public-demo lock. When true, POST /api/analyze accepts only the bundled
+    # demo repositories. repo_url and any other path return 403. Default false
+    # so a local server can still analyze other repos.
+    demo_mode: bool = False
 
     @property
     def nebius_ready(self) -> bool:
@@ -103,3 +114,23 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def parse_cors_origins(value: str) -> list[str]:
+    """Split a comma-separated origin list. Blank pieces are dropped."""
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def cors_middleware_kwargs() -> dict[str, object]:
+    """Arguments for CORSMiddleware.
+
+    An empty regex must become None. Starlette compiles "" and that pattern
+    matches every origin.
+    """
+    regex = settings.cors_allow_origin_regex.strip()
+    return {
+        "allow_origins": parse_cors_origins(settings.cors_allow_origins),
+        "allow_origin_regex": regex or None,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }

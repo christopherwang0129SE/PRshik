@@ -33,6 +33,9 @@ def _isolate_nebius_settings(monkeypatch: pytest.MonkeyPatch, tmp_path_factory) 
     monkeypatch.setattr(settings, "tavily_enabled", True)
     monkeypatch.setattr(settings, "tavily_timeout_seconds", 8.0)
     monkeypatch.setattr(settings, "tavily_max_results", 3)
+    # A developer .env may set DEMO_MODE for a hosted-style local run.
+    # The suite analyzes temp repos, so the lock stays off unless a test opts in.
+    monkeypatch.setattr(settings, "demo_mode", False)
     clear_cache()
 
 

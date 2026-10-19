@@ -54,6 +54,8 @@ The bundled checkout demo imports only the Python standard library, so Tavily st
 
 ## Setup
 
+Hosted demo (Vercel + Railway): [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ### Backend
 
 ```bash
