@@ -63,8 +63,17 @@ class Settings(BaseSettings):
     branch_tests_js_max_packages: int = 3  # test packages per pair (most shared first)
     branch_tests_node: str = ""  # node binary; default: PATH, ~/.local/bin, Homebrew
 
-    # --- Tavily (used later by the Resolver for doc lookups) ---
+    # --- Tavily (library documentation in the Nemotron risk and verify prompts) ---
+    # Conflicting code is scanned for third-party imports. A short search
+    # snippet is added to those prompts. Empty key or TAVILY_ENABLED=false
+    # skips the network entirely; search errors are logged and ignored.
     tavily_api_key: str = ""
+    tavily_enabled: bool = True
+    # One search request. tavily-python 0.5.0 cannot honour this (it waits
+    # 100s), so the client in app/services/docs_lookup.py uses httpx.
+    tavily_timeout_seconds: float = 8.0
+    # Results requested per query. Snippets are then trimmed to a small budget.
+    tavily_max_results: int = 3
 
     # --- GitHub pull-request integration ---
     github_repository: str = ""
@@ -82,7 +91,7 @@ class Settings(BaseSettings):
 
     @property
     def tavily_ready(self) -> bool:
-        return bool(self.tavily_api_key)
+        return self.tavily_enabled and bool(self.tavily_api_key.strip())
 
     @property
     def seated_github_users(self) -> set[str]:

@@ -45,8 +45,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
-from app.schemas import PairRisk, Verification, VerifyRun
-from app.services import cache, git_service, nemotron, prefilter
+from app.schemas import DocSource, PairRisk, Verification, VerifyRun
+from app.services import cache, docs_lookup, git_service, nemotron, prefilter
 from app.services.nemotron import NemotronError
 from app.services.usage import UsageMeter
 
@@ -204,6 +204,7 @@ def build_test_prompt(
     branch_b: str,
     focus: list[str] | None = None,
     evidence: list[str] | None = None,
+    docs: str = "",
 ) -> str:
     focus = focus or []
     py_a = _changed_py(repo, base, branch_a)
@@ -227,6 +228,8 @@ def build_test_prompt(
     hints = break_hints(repo, base, branch_a, branch_b, evidence or [])
     if hints:
         sections += ["== Exact static check: call sites that no longer match ==", *hints, ""]
+    if docs.strip():
+        sections += [docs.strip(), ""]
     for label, branch, paths in (("A", branch_a, py_a), ("B", branch_b, py_b)):
         sections.append(f"== Branch {label} ({branch}) commit messages ==")
         sections.append(_clip(git_service.commit_messages(repo, base, branch), 1500))
@@ -951,6 +954,7 @@ def verify_pair(
     meter = meter or UsageMeter()
     started = time.monotonic()
     tokens = [0, 0]
+    doc_sources: list[DocSource] = []
 
     def finish(status: str, reason: str, **extra) -> Verification:
         result = Verification(
@@ -960,6 +964,7 @@ def verify_pair(
             duration_s=round(time.monotonic() - started, 2),
             prompt_tokens=tokens[0],
             completion_tokens=tokens[1],
+            docs_sources=doc_sources,
             **extra,
         )
         return result
@@ -970,9 +975,12 @@ def verify_pair(
         if not (_changed_py(repo, base, pair.branch_a) or _changed_py(repo, base, pair.branch_b)):
             return finish("skipped", "no Python changes on either branch")
         key = _cache_key(repo, base, sha_a, sha_b)
+        snippets = docs_lookup.lookup_for_pair(repo, base, pair.branch_a, pair.branch_b)
+        doc_sources.extend(DocSource(**item) for item in docs_lookup.to_sources(snippets))
         prompt = build_test_prompt(
             repo, base, pair.branch_a, pair.branch_b,
             focus=focus_paths(pair.symbol_evidence), evidence=pair.symbol_evidence,
+            docs=docs_lookup.format_docs_section(snippets),
         )
     except git_service.GitError as exc:
         return finish("error", f"git: {exc}"[:300])

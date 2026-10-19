@@ -38,6 +38,13 @@ export type FallbackReason =
   | 'unparsable'
   | null;
 
+/** A Tavily documentation hit for a library imported by a conflicting pair. */
+export interface DocSource {
+  title: string;
+  url: string;
+  query: string;
+}
+
 export interface PairRisk {
   branch_a: string;
   branch_b: string;
@@ -64,6 +71,8 @@ export interface PairRisk {
   prompt_tokens?: number;
   completion_tokens?: number;
   verification?: Verification | null;
+  /** Present when Tavily supplied library docs for this pair. */
+  docs_sources?: DocSource[];
   branch_tests?: BranchTests | null;
   score_note?: string | null;
   blended_score?: number | null;
@@ -100,6 +109,7 @@ export interface Verification {
   duration_s: number;
   prompt_tokens: number;
   completion_tokens: number;
+  docs_sources?: DocSource[];
 }
 
 export type BranchTestStatus = 'confirmed' | 'passed' | 'skipped' | 'unsupported' | 'error';

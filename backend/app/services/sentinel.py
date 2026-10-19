@@ -14,6 +14,11 @@ Token Factory; results are cached on disk keyed by (base sha, head shas,
 model, prompt version), so an identical re-run makes zero LLM calls. Token
 usage and estimated $ are returned in ``usage``.
 
+When Tavily is configured (``TAVILY_API_KEY`` set and ``TAVILY_ENABLED``),
+third-party libraries imported by a pair are looked up and a short excerpt is
+added to the Nemotron prompts. A missing key, ``TAVILY_ENABLED=false``, or a
+search error leaves those prompts unchanged.
+
 When Nebius is configured (``NEBIUS_API_KEY`` set and ``NEBIUS_ENABLED``), the
 selected pairs are sent to NVIDIA Nemotron. The published score is an equal blend of the git
 score and the model's ``risk_score``. If the hunks overlap, the blend cannot
@@ -37,6 +42,7 @@ from app.schemas import (
     BranchDiff,
     BranchTests,
     ChangedFile,
+    DocSource,
     FallbackReason,
     FileCollision,
     PairRisk,
@@ -44,7 +50,16 @@ from app.schemas import (
     UsageSummary,
     Verification,
 )
-from app.services import branch_tests, cache, claims, git_service, nemotron, prefilter, verifier
+from app.services import (
+    branch_tests,
+    cache,
+    claims,
+    docs_lookup,
+    git_service,
+    nemotron,
+    prefilter,
+    verifier,
+)
 from app.services.nemotron import (
     NemotronError,
     build_pair_prompt,
@@ -265,6 +280,14 @@ def _refine_one(
 
     diff_a = diff_by_branch[pair.branch_a]
     diff_b = diff_by_branch[pair.branch_b]
+    snippets = docs_lookup.lookup_for_pair(
+        repo, base_branch, pair.branch_a, pair.branch_b, diff_by_branch=diff_by_branch,
+    )
+    if snippets:
+        # model_copy does not re-validate, so build the models here.
+        pair = pair.model_copy(update={
+            "docs_sources": [DocSource(**item) for item in docs_lookup.to_sources(snippets)],
+        })
     try:
         prompt = build_pair_prompt(
             base_branch=base_branch,
@@ -274,6 +297,7 @@ def _refine_one(
             commits_a=_commits(repo, pair.branch_a),
             commits_b=_commits(repo, pair.branch_b),
             excerpt=_excerpt(repo, base_branch, pair),
+            docs=docs_lookup.format_docs_section(snippets),
         )
         reply = nemotron.complete(prompt)
         prompt_tokens, completion_tokens = nemotron.usage_of(reply)
@@ -440,6 +464,10 @@ def apply_verification(pair: PairRisk, result: Verification) -> PairRisk:
     shown score floored at ``verify_confirmed_floor`` (git/model scores are kept
     as-is). Any other status keeps the blended score."""
     update: dict = {"verification": result}
+    # The risk prompt may already have recorded the same lookup. Don't clear
+    # it when verify did not search (no Python, or Tavily was off).
+    if result.docs_sources:
+        update["docs_sources"] = result.docs_sources
     if result.status == "confirmed":
         floor = float(settings.verify_confirmed_floor)
         update.update(

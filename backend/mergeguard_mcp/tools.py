@@ -152,6 +152,10 @@ def pair_summary(pair: PairRisk, focus: str | None = None) -> dict[str, Any]:
         verdict_reason=reason,
         rationale=pair.rationale,
         symbol_evidence=list(pair.symbol_evidence[:MAX_EVIDENCE]),
+        docs_sources=[
+            {"title": source.title, "url": source.url, "query": source.query}
+            for source in pair.docs_sources
+        ],
         static_breaks=list(pair.static_breaks),
         unsupported_claims=list(pair.unsupported_claims),
         overlapping_files=pair.overlapping_files,

@@ -77,6 +77,14 @@ class VerifyRun(BaseModel):
     failure_lines: dict[str, int] = Field(default_factory=dict)
 
 
+class DocSource(BaseModel):
+    """A Tavily hit attached to a pair. The snippet body stays in the prompt."""
+
+    title: str = ""
+    url: str
+    query: str = ""
+
+
 class Verification(BaseModel):
     """Verify-by-test result for one pair.
 
@@ -101,6 +109,8 @@ class Verification(BaseModel):
     duration_s: float = 0.0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Set when this verify run consulted Tavily. Empty if it did not.
+    docs_sources: list[DocSource] = Field(default_factory=list)
 
 
 BranchTestStatus = Literal["confirmed", "passed", "skipped", "unsupported", "error"]
@@ -196,6 +206,9 @@ class PairRisk(BaseModel):
     completion_tokens: int = 0
     # Verify-by-test result (only for high-risk pairs on local/demo repos).
     verification: Verification | None = None
+    # Tavily hits for third-party libraries this pair imports. Empty when the
+    # lookup did not run (no key, disabled, nothing third-party, or it failed).
+    docs_sources: list[DocSource] = Field(default_factory=list)
     # Branch tests on the merge (deterministic, no LLM; local allowed repos only).
     branch_tests: BranchTests | None = None
     # Set when something other than the git/model blend decided `score`/`level`,

@@ -333,6 +333,7 @@ def build_pair_prompt(
     commits_a: list[str],
     commits_b: list[str],
     excerpt: str,
+    docs: str = "",
 ) -> str:
     """Bounded context for one pair: files, hunks, commit subjects, diff excerpt."""
     git_score = pair.git_score if pair.git_score is not None else pair.score
@@ -371,6 +372,10 @@ def build_pair_prompt(
         "Shared or overlapping regions:",
         *_collision_lines(pair),
     ]
+    # An empty string must not add a line, so Tavily being off leaves the
+    # prompt identical.
+    if docs.strip():
+        sections.extend(["", docs.strip()])
     body = "\n".join(sections)
 
     header = "\n\nDiff excerpts (trimmed):\n"

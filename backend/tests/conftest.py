@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
+from app.services.docs_lookup import clear_cache
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +27,13 @@ def _isolate_nebius_settings(monkeypatch: pytest.MonkeyPatch, tmp_path_factory) 
         "nebius_base_url",
         "https://api.tokenfactory.nebius.com/v1/",
     )
+    # A developer backend/.env may contain TAVILY_API_KEY. Tests must not
+    # call Tavily unless they opt in with a fake key (or the live smoke test).
+    monkeypatch.setattr(settings, "tavily_api_key", "")
+    monkeypatch.setattr(settings, "tavily_enabled", True)
+    monkeypatch.setattr(settings, "tavily_timeout_seconds", 8.0)
+    monkeypatch.setattr(settings, "tavily_max_results", 3)
+    clear_cache()
 
 
 def _git(repo: Path, *args: str) -> None:
