@@ -47,7 +47,7 @@ That same signal doubles as a **review-prioritisation indicator**: the pull requ
 
 Token Factory is where NVIDIA Nemotron 3 Super runs. It writes the pair risk explanation and the intent test for verify-by-test. Each call is a single chat-completions attempt. The API reports token usage and an estimated cost. Repeat runs of the same SHAs come from disk.
 
-Tavily is the library-doc lookup for both of those prompts. Up to two searches, snippets trimmed into a "Library documentation (via Tavily web search)" section, and `docs_sources` (`title`, `url`, `query`) on the pair and on the verification result. That array is what a pair card would show as "Grounded with library docs". The dashboard type includes `docs_sources`. The pair table does not render that label. Empty `TAVILY_API_KEY` or `TAVILY_ENABLED=false` skips the network. The checkout demo never triggers it, because it only imports the Python standard library. Planner and Merger are still planned. Tavily is already used by Sentinel and verify-by-test.
+Tavily is the library-doc lookup for both of those prompts. Up to two searches, snippets trimmed into a "Library documentation (via Tavily web search)" section, and `docs_sources` (`title`, `url`, `query`) on the pair and on the verification result. The dashboard renders that array on the pair card as "Grounded with library docs (Tavily)", visible without expanding anything. Empty `TAVILY_API_KEY` or `TAVILY_ENABLED=false` skips the network. The checkout demo never triggers it, because it only imports the Python standard library. Planner and Merger are still planned. Tavily is already used by Sentinel and verify-by-test.
 
 ## Challenges we ran into
 

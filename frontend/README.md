@@ -132,7 +132,7 @@ This project was bootstrapped with [Vite](https://vitejs.dev/) using the React +
 - `src/utils/risk.ts`: Utility functions for mapping risk levels to colors and text, computing branch risk levels, and sorting pairs.
 - `src/utils/repo.ts`: Classifies a repository input into `repo_url` or `repo_path`.
 - `src/utils/agent.ts`: Derives Sentinel status (online/offline) and mode (git only / git+Nemotron) from health.
-- `src/components/`: Contains `BranchLights`, `PairTable`, and `AgentStatus` components.
+- `src/components/`: `Pipeline` (how-it-works + staged progress), `ErrorPanel`, `SummaryBar` (verdict), `BranchLights`, `PairList` (risky pair cards, Tavily `DocsSources`, test evidence), `AgentStatus`.
 - `src/utils/risk.test.ts`, `src/utils/repo.test.ts`, `src/utils/agent.test.ts`, `src/services/api.test.ts`, and `src/components/*.test.tsx`: Unit and render tests.
 
 ## Acknowledgements
