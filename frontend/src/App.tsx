@@ -13,8 +13,10 @@ import { STEPS, estimatedStep } from './utils/pipeline';
 import { ErrorPanel } from './components/ErrorPanel';
 import './App.css';
 
-// Demo repo path, injected by Vite (see vite.config.ts `define`).
+// Demo repo paths, injected by Vite (see vite.config.ts `define`).
+// An empty string hides that button.
 const DEMO_REPO_PATH: string = import.meta.env.VITE_DEMO_REPO_PATH ?? '';
+const API_DEMO_REPO_PATH: string = import.meta.env.VITE_API_DEMO_REPO_PATH ?? '';
 
 const Logo = () => (
   <svg className="logo" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
@@ -103,7 +105,7 @@ function App() {
   const runAnalysis = async (repo: string) => {
     const repoField = classifyRepoInput(repo);
     if (!repoField.repo_url && !repoField.repo_path) {
-      setFieldError('Enter a repository path or URL, or choose Try demo repo.');
+      setFieldError('Enter a repository path or URL, or choose a demo.');
       repoRef.current?.focus();
       return;
     }
@@ -139,16 +141,16 @@ function App() {
     runAnalysis(repoInput);
   };
 
-  const handleTryDemo = () => {
-    if (DEMO_REPO_PATH) {
-      setRepoInput(DEMO_REPO_PATH);
-      runAnalysis(DEMO_REPO_PATH);
-    }
+  const handleTryDemo = (path: string) => {
+    if (!path) return;
+    setRepoInput(path);
+    runAnalysis(path);
   };
 
   const backendOffline = healthChecked && !health;
   const mode = loading ? 'running' : response ? 'done' : 'intro';
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
+  const hasDemo = Boolean(DEMO_REPO_PATH || API_DEMO_REPO_PATH);
 
   return (
     <div className="app">
@@ -173,21 +175,48 @@ function App() {
             </p>
 
             <div className="start-card">
-              {DEMO_REPO_PATH && (
-                <div className="demo-row">
-                  <button type="button" className="btn btn-primary btn-demo" onClick={handleTryDemo} disabled={loading}>
-                    Try demo repo
-                  </button>
-                  <p className="demo-note" id="demo-note">
-                    A small checkout service with three branches. Two of them change how discounts and
-                    tax combine, and git merges them cleanly.
-                  </p>
+              {hasDemo && (
+                <div className="demo-rows">
+                  {DEMO_REPO_PATH && (
+                    <div className="demo-row">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-demo"
+                        onClick={() => handleTryDemo(DEMO_REPO_PATH)}
+                        disabled={loading}
+                        aria-describedby="demo-note"
+                      >
+                        Try demo repo
+                      </button>
+                      <p className="demo-note" id="demo-note">
+                        A small checkout service with three branches. Two of them change how discounts and
+                        tax combine, and git merges them cleanly.
+                      </p>
+                    </div>
+                  )}
+                  {API_DEMO_REPO_PATH && (
+                    <div className="demo-row">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-demo"
+                        onClick={() => handleTryDemo(API_DEMO_REPO_PATH)}
+                        disabled={loading}
+                        aria-describedby="api-demo-note"
+                      >
+                        Try API demo (Tavily)
+                      </button>
+                      <p className="demo-note" id="api-demo-note">
+                        A requests client and a pydantic model. Two branches disagree on cents versus
+                        dollars, so Tavily looks up the library docs.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
               <form onSubmit={handleSubmit} className="input-form" noValidate aria-labelledby="own-repo-heading">
                 <h2 id="own-repo-heading" className="form-heading">
-                  {DEMO_REPO_PATH ? 'Or analyze your own repository' : 'Analyze a repository'}
+                  {hasDemo ? 'Or analyze your own repository' : 'Analyze a repository'}
                 </h2>
                 <div className="field field-repo">
                   <label htmlFor="repo-input">Repository path or URL</label>

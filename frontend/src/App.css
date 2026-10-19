@@ -179,22 +179,34 @@ h1 {
   }
 }
 
-.demo-row {
+.demo-rows {
   display: grid;
-  gap: 12px;
+  gap: 14px;
+  min-width: 0;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--line);
 }
 
+.demo-row {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 @media (min-width: 640px) {
+  .demo-rows {
+    gap: 12px;
+  }
+
   .demo-row {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: 16.75rem minmax(0, 1fr);
     align-items: center;
     gap: 20px;
   }
 }
 
 .demo-note {
+  min-width: 0;
   font-size: 0.9375rem;
   color: var(--muted);
   max-width: 52ch;
@@ -302,9 +314,18 @@ h1 {
 }
 
 .btn-demo {
+  width: 100%;
   min-height: 48px;
-  padding-inline: 24px;
-  font-size: 1.0625rem;
+  padding-inline: 16px;
+  font-size: 1rem;
+}
+
+@media (min-width: 640px) {
+  .btn-demo {
+    width: 16.75rem;
+    padding-inline: 18px;
+    font-size: 1.0625rem;
+  }
 }
 
 .btn-secondary {

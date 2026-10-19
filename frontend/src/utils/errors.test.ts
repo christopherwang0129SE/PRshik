@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeError, BACKEND_START_COMMAND, DEMO_REPO_COMMAND } from './errors';
+import { describeError, API_DEMO_REPO_COMMAND, BACKEND_START_COMMAND, DEMO_REPO_COMMAND } from './errors';
 
 describe('describeError', () => {
   it('turns a network failure into a start-the-backend fix', () => {
@@ -13,7 +13,7 @@ describe('describeError', () => {
     const help = describeError('/tmp/x is not a git repository', 'http://localhost:8000');
     expect(help.title).toBe("That path isn't a git repository");
     expect(help.body).toBe('/tmp/x is not a git repository');
-    expect(help.fix?.command).toBe(DEMO_REPO_COMMAND);
+    expect(help.fix?.command).toBe(`${DEMO_REPO_COMMAND}\n${API_DEMO_REPO_COMMAND}`);
   });
 
   it('explains a repository with no branches to compare', () => {

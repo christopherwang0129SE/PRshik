@@ -7,6 +7,7 @@ export interface ErrorHelp {
 
 export const BACKEND_START_COMMAND = 'cd backend && uvicorn app.main:app --port 8000';
 export const DEMO_REPO_COMMAND = 'python3 demo/make_demo_repo.py';
+export const API_DEMO_REPO_COMMAND = 'python3 demo/make_api_demo_repo.py';
 
 /**
  * Turn a failed /api/analyze call into a title, the cause and the next step.
@@ -26,8 +27,8 @@ export const describeError = (message: string, apiBase: string): ErrorHelp => {
       title: "That path isn't a git repository",
       body: message,
       fix: {
-        text: 'Check the path. To use the demo instead, create it from the repository root and choose Try demo repo:',
-        command: DEMO_REPO_COMMAND,
+        text: 'Check the path. To use a bundled demo instead, create it from the repository root and choose the matching button:',
+        command: `${DEMO_REPO_COMMAND}\n${API_DEMO_REPO_COMMAND}`,
       },
     };
   }

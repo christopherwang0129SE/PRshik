@@ -59,6 +59,7 @@ const RESULT: AnalyzeResponse = {
 // The demo path is injected via `define` in vite.config.ts: the absolute
 // path to demo/checkout-demo, resolved from the config location.
 const expectedDemoPath = path.resolve(process.cwd(), '../demo/checkout-demo');
+const expectedApiDemoPath = path.resolve(process.cwd(), '../demo/api-demo');
 
 /** Route the fetch mock by URL so call order does not matter. */
 const routeFetch = (fetchMock: ReturnType<typeof vi.fn>, analyze: () => Promise<Response>) => {
@@ -87,6 +88,8 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Sentinel diffs every branch' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Nemotron explains the risk' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Tests prove it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try demo repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try API demo (Tavily)' })).toBeInTheDocument();
     expect(await screen.findByText('Sentinel online')).toBeInTheDocument();
   });
 
@@ -114,6 +117,21 @@ describe('App', () => {
     expect(JSON.parse(analyzeCall[1].body)).toEqual({ repo_path: expectedDemoPath, base_branch: 'main' });
   });
 
+  it('fills the repo field with the API demo path on "Try API demo (Tavily)"', async () => {
+    routeFetch(fetchMock, () => Promise.resolve(jsonResponse(RESULT)));
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try API demo (Tavily)' }));
+
+    const input = screen.getByLabelText('Repository path or URL') as HTMLInputElement;
+    expect(input.value).toBe(expectedApiDemoPath);
+    expect(screen.getByRole('heading', { name: 'Analyzing' })).toBeInTheDocument();
+    await screen.findByRole('heading', { name: '1 hidden conflict proven by tests' });
+
+    const analyzeCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/analyze'))!;
+    expect(JSON.parse(analyzeCall[1].body)).toEqual({ repo_path: expectedApiDemoPath, base_branch: 'main' });
+  });
+
   it('flags an empty repository field without calling the API', () => {
     routeFetch(fetchMock, () => Promise.resolve(jsonResponse(RESULT)));
     render(<App />);
@@ -135,7 +153,8 @@ describe('App', () => {
     const heading = await screen.findByRole('heading', { name: "That path isn't a git repository" });
     expect(heading).toHaveFocus();
     expect(screen.getByText('/tmp/not-a-repo is not a git repository')).toBeInTheDocument();
-    expect(screen.getByText('python3 demo/make_demo_repo.py')).toBeInTheDocument();
+    expect(screen.getByText(/python3 demo\/make_demo_repo\.py/)).toBeInTheDocument();
+    expect(screen.getByText(/python3 demo\/make_api_demo_repo\.py/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 

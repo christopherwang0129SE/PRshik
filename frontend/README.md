@@ -31,20 +31,29 @@ Create a `.env` file in the frontend directory (if needed) with:
    VITE_API_BASE_URL=http://localhost:8000
    ```
 
-#### Demo repo path (`VITE_DEMO_REPO_PATH`)
+#### Demo repo paths (`VITE_DEMO_REPO_PATH`, `VITE_API_DEMO_REPO_PATH`)
 
-The **Try demo repo** button fills the repository field with the path to the
-demo repository (`demo/checkout-demo/`, see `demo/README.md`). The path is
-computed in `vite.config.ts` via `define` from the config's location, so it
-works from any checkout. To point the button at a different location, set
-`VITE_DEMO_REPO_PATH` in the environment (it takes precedence over the
-computed default):
+**Try demo repo** fills the repository field with `demo/checkout-demo/`
+(stdlib checkout conflict; Tavily stays idle). **Try API demo (Tavily)** fills
+it with `demo/api-demo/` (requests + pydantic conflict that grounds the pair
+card). Both paths are computed in `vite.config.ts` via `define` from the
+config's location, so the buttons work from any checkout. Set the matching
+variable to point a button somewhere else. An empty value hides that button;
+leaving the variable unset keeps the default:
 
 ```bash
 VITE_DEMO_REPO_PATH=/some/other/path/to/checkout-demo npm run dev
+VITE_API_DEMO_REPO_PATH=/some/other/path/to/api-demo npm run dev
 ```
 
-Create the demo repo with `python3 demo/make_demo_repo.py` (idempotent) before clicking **Try demo repo**. The folder is gitignored. If it is missing, analyze returns 400 and the dashboard shows the API detail: the path is not a git repository. The demo imports only the Python standard library, so a Tavily key does not produce `docs_sources` for it.
+Create the repos before clicking (both are gitignored):
+
+```bash
+python3 demo/make_demo_repo.py
+python3 demo/make_api_demo_repo.py
+```
+
+If a folder is missing, analyze returns 400 and the dashboard shows the API detail: the path is not a git repository. See `demo/README.md`.
 
 ### Running the Backend
 
@@ -85,7 +94,8 @@ To run the unit tests:
   - Remote Git URLs (`https://…`, `git@…`, `ssh://…`) are sent as `repo_url`.
   - Local paths (`/…`, `./…`, `~/…`) are sent as `repo_path`.
   - The two fields are mutually exclusive — only one is ever sent.
-  - **Try demo repo** fills the field with the demo repo path (`VITE_DEMO_REPO_PATH`, default `demo/checkout-demo/`).
+  - **Try demo repo** fills the field with the checkout demo (`VITE_DEMO_REPO_PATH`, default `demo/checkout-demo/`).
+  - **Try API demo (Tavily)** fills the field with the API demo (`VITE_API_DEMO_REPO_PATH`, default `demo/api-demo/`). This is the run that asks Tavily for `requests` and `pydantic` docs. A button is hidden when its path is empty.
 - **Summary Bar**: After an analyze, a card under the form shows the worst *effective* level across pairs and how many pairs are risky. A pair is **risky** when its published level is medium/high **or** it is a hidden conflict (the model flagged a medium/high semantic clash the git heuristic missed). Headline rules:
   - only hidden conflicts, nothing published medium/high → `1 hidden conflict among 3 pairs` (plural: `2 hidden conflicts among …`);
   - shown medium/high pairs → `N of M branch pairs at <worst> risk`, with `· C confirmed by test` appended when verify-by-test confirmed C pairs and `· K hidden` when hidden conflicts also exist (e.g. `1 of 3 branch pairs at high risk · 1 confirmed by test · 1 hidden`);

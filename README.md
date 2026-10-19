@@ -41,7 +41,7 @@ Hits are returned as `docs_sources` (`title`, `url`, `query`) on the pair and, w
 
 Search results are cached in process, per query, for the life of the process. A disk-cache hit on the risk score restores the `docs_sources` stored with that assessment, with no new Tavily search and no Nemotron call. A cache file written before that field existed still loads and yields an empty list. Verify-by-test can still search when it builds a test prompt and attach its own list.
 
-The bundled checkout demo imports only the Python standard library, so Tavily stays idle there even with a key. A repo whose changed files import a third-party library triggers it. A live end-to-end run on a small repo that imported `requests` returned `docs_sources` from requests.readthedocs.io and related pages. The opt-in smoke test is `test_live_tavily_search_for_requests` (see [Tests](#tests)).
+The bundled checkout demo imports only the Python standard library, so Tavily stays idle there even with a key. The bundled API demo (`demo/api-demo/`, `python3 demo/make_api_demo_repo.py`) is the one that triggers it: the conflicting branches change a `requests` client (`Session`, `session.mount`, `session.get(..., timeout=...)`) and a pydantic `field_validator`, so the pair card shows "Grounded with library docs (Tavily)". Any other repo whose changed files import a third-party library triggers it the same way. A live end-to-end run on a small repo that imported `requests` returned `docs_sources` from requests.readthedocs.io and related pages. The opt-in smoke test is `test_live_tavily_search_for_requests` (see [Tests](#tests)).
 
 `/api/health` reports `tavily_ready` (key present and `TAVILY_ENABLED`).
 
@@ -71,15 +71,21 @@ uvicorn app.main:app --reload --port 8000
 
 Open http://localhost:8000/docs for the API. Git scoring works with both keys empty.
 
-### Demo repo for the dashboard
+### Demo repos for the dashboard
 
-**Try demo repo** fills the repository field with `demo/checkout-demo/`. That folder is gitignored. Create it before clicking the button:
+Both folders are gitignored. Create them before clicking the matching button. If a folder is missing, `POST /api/analyze` returns 400 and the dashboard shows the detail, which says the path is not a git repository.
+
+| Button | Create | What a judge sees |
+|--------|--------|-------------------|
+| **Try demo repo** | `python3 demo/make_demo_repo.py` | `demo/checkout-demo/`. A checkout module. Two branches disagree about discount and tax. Git merges them cleanly. Standard library only, so Tavily does not search. |
+| **Try API demo (Tavily)** | `python3 demo/make_api_demo_repo.py` | `demo/api-demo/`. A `requests` client and a pydantic model. Two branches disagree about cents versus dollars. The changed lines name `session.mount`, `session.get`, and `field_validator`, so Tavily fills "Grounded with library docs (Tavily)" on the pair card. |
 
 ```bash
 python3 demo/make_demo_repo.py
+python3 demo/make_api_demo_repo.py
 ```
 
-If the folder is missing, `POST /api/analyze` returns 400 and the dashboard shows the detail, which says the path is not a git repository. The demo uses only the Python standard library, so Tavily does not search it.
+Each branch passes `python3 -m unittest discover -s tests` on its own. Merging the two feature branches leaves no textual conflict and fails tests. `python3 demo/make_demo_repo.py --verify` and `python3 demo/make_api_demo_repo.py --verify` check that. The API demo's tests stub `requests` and `pydantic` when those packages are not installed, and they never open a socket. See `demo/README.md`.
 
 ### Frontend
 
