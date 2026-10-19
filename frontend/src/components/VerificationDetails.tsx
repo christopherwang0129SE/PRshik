@@ -1,10 +1,12 @@
-import type { Verification, VerifyRun } from '../types';
+import type { DocSource, Verification, VerifyRun } from '../types';
 import { ProofStrip } from './ProofStrip';
 import { confirmingRuns } from '../utils/verification';
 import { DocsSources } from './DocsSources';
 
 interface VerificationDetailsProps {
   verification: Verification;
+  /** Docs the pair card already lists; not repeated here. */
+  pairDocs?: DocSource[];
 }
 
 const BADGE: Record<Verification['status'], { label: string; className: string }> = {
@@ -36,7 +38,8 @@ const runSummary = (run: VerifyRun): string => {
  * the pass/pass/fail proof, and an expandable section with the generated
  * pytest test and the per-checkout outcomes.
  */
-export const VerificationDetails = ({ verification }: VerificationDetailsProps) => {
+export const VerificationDetails = ({ verification, pairDocs }: VerificationDetailsProps) => {
+  const shown = new Set((pairDocs ?? []).map((source) => source.url));
   const badge = BADGE[verification.status];
   const confirmed = verification.status === 'confirmed';
   return (
@@ -77,9 +80,7 @@ export const VerificationDetails = ({ verification }: VerificationDetailsProps) 
           {verification.sandbox && <p className="run-note">Sandbox: {verification.sandbox}</p>}
         </details>
       )}
-      {verification.docs_sources && verification.docs_sources.length > 0 && (
-        <DocsSources sources={verification.docs_sources} />
-      )}
+      <DocsSources sources={verification.docs_sources?.filter((source) => !shown.has(source.url))} />
     </section>
   );
 };

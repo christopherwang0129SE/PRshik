@@ -26,6 +26,14 @@ describe('Pipeline', () => {
     expect(screen.getByText('two')).toBeInTheDocument();
   });
 
+  it('marks the test step skipped instead of done when no test ran', () => {
+    const { container } = render(<Pipeline mode="done" facts={['one', 'two', 'No tests ran.']} testsSkipped />);
+    const steps = container.querySelectorAll('.pipeline-step');
+    expect(steps[1]).toHaveAttribute('data-state', 'done');
+    expect(steps[2]).toHaveAttribute('data-state', 'skipped');
+    expect(screen.getByRole('heading', { name: 'Tests prove it: Skipped' })).toBeInTheDocument();
+  });
+
   it('estimates the step from elapsed seconds', () => {
     expect(estimatedStep(0)).toBe(0);
     expect(estimatedStep(5)).toBe(1);
