@@ -76,7 +76,14 @@ def _install(monkeypatch: pytest.MonkeyPatch, calls: list, *, results=None, erro
         def __init__(self, api_key: str) -> None:
             calls.append("init")
 
-        def search(self, query: str, *, max_results: int, timeout: float) -> dict:
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
             calls.append(("search", query, max_results, timeout))
             if error is not None:
                 raise error
@@ -122,9 +129,10 @@ def test_detects_python_and_js_third_party_imports() -> None:
     assert "__future__" not in py_libs
     fastapi = next(hit for hit in py_hits if hit.library == "fastapi")
     assert fastapi.symbol == "FastAPI"
+    assert [hit.symbol for hit in py_hits if hit.library == "fastapi"][:2] == ["FastAPI", "Depends"]
     assert docs_lookup.build_queries(py_hits) == [
         "requests documentation",
-        "fastapi FastAPI documentation",
+        "fastapi FastAPI Depends documentation",
     ]
 
     js_hits = docs_lookup.detect_imports(JS_SAMPLE, paths=["src/local.ts", "src/util.ts"])
@@ -148,6 +156,313 @@ def test_diff_prefixes_and_relative_imports_are_skipped() -> None:
     hits = docs_lookup.detect_imports(DIFF_SAMPLE, paths=["checkout.py", "app.py"])
     libs = {hit.library for hit in hits}
     assert libs == {"requests", "fastapi"}
+
+
+def _diff(*lines: str) -> str:
+    return "\n".join(lines)
+
+
+def test_from_import_names_up_to_two_symbols() -> None:
+    one = docs_lookup.detect_imports("from fastapi import Depends\n")
+    assert [(hit.library, hit.symbol) for hit in one] == [("fastapi", "Depends")]
+    assert docs_lookup.build_queries(one) == ["fastapi Depends documentation"]
+
+    pairs = docs_lookup.detect_imports("from fastapi import FastAPI, Depends\n")
+    assert [hit.symbol for hit in pairs] == ["FastAPI", "Depends"]
+    assert docs_lookup.build_queries(pairs) == ["fastapi FastAPI Depends documentation"]
+
+    three = docs_lookup.detect_imports("from pydantic import BaseModel, Field, ConfigDict\n")
+    assert [hit.symbol for hit in three] == ["BaseModel", "Field", "ConfigDict"]
+    assert docs_lookup.build_queries(three) == ["pydantic BaseModel Field documentation"]
+
+
+def test_alias_attribute_and_session_mount_usage() -> None:
+    aliased = "import requests as req\n\ndef fetch(url):\n    return req.get(url)\n"
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(aliased)) == [
+        "requests get documentation",
+    ]
+
+    mounted = (
+        "import requests\n\n"
+        "def run(adapter):\n"
+        "    session = requests.Session()\n"
+        "    session.mount('https://', adapter)\n"
+        "    return session\n"
+    )
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(mounted)) == [
+        "requests Session.mount documentation",
+    ]
+
+    both = (
+        "import requests\n\n"
+        "def run(url, adapter):\n"
+        "    session = requests.Session()\n"
+        "    session.mount('https://', adapter)\n"
+        "    return requests.get(url)\n"
+    )
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(both)) == [
+        "requests Session.mount get documentation",
+    ]
+
+
+def test_js_named_import_query() -> None:
+    hits = docs_lookup.detect_imports("import { useEffect } from 'react'\n")
+    assert docs_lookup.build_queries(hits) == ["react useEffect documentation"]
+
+    many = docs_lookup.detect_imports(
+        "import { useState, useEffect, useMemo } from 'react'\n"
+    )
+    assert [hit.symbol for hit in many] == ["useState", "useEffect", "useMemo"]
+    assert docs_lookup.build_queries(many) == ["react useState useEffect documentation"]
+
+    renamed = docs_lookup.detect_imports(
+        "import { useEffect as effect } from 'react'\n\neffect(() => {})\n"
+    )
+    assert docs_lookup.build_queries(renamed) == ["react useEffect documentation"]
+
+
+def test_changed_lines_beat_unused_imports() -> None:
+    diff = _diff(
+        "diff --git a/app.py b/app.py",
+        "@@ -1,4 +1,4 @@",
+        " import requests",
+        " from fastapi import FastAPI, Depends, HTTPException",
+        " def run():",
+        "-    return 1",
+        "+    return Depends(get_user)",
+    )
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(diff, paths=["app.py"])) == [
+        "requests documentation",
+        "fastapi Depends documentation",
+    ]
+
+    ordered = _diff(
+        "diff --git a/app.py b/app.py",
+        "@@ -1,4 +1,5 @@",
+        " from fastapi import FastAPI, Depends",
+        " def run():",
+        "-    return 1",
+        "+    return Depends(get_user)",
+        "+    return FastAPI()",
+    )
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(ordered)) == [
+        "fastapi Depends FastAPI documentation",
+    ]
+
+    aliased = _diff(
+        "diff --git a/app.py b/app.py",
+        "@@ -1,3 +1,3 @@",
+        " import requests as req",
+        " def fetch(url):",
+        "-    return None",
+        "+    return req.get(url)",
+    )
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(aliased)) == [
+        "requests get documentation",
+    ]
+
+
+def test_multiline_import_does_not_count_as_a_use() -> None:
+    text = (
+        "from fastapi import (\n"
+        "    FastAPI,\n"
+        "    Depends,\n"
+        "    HTTPException,\n"
+        ")\n\n"
+        "def endpoint(user=HTTPException(401)):\n"
+        "    return user\n"
+    )
+    assert docs_lookup.build_queries(docs_lookup.detect_imports(text)) == [
+        "fastapi HTTPException documentation",
+    ]
+
+
+def test_generic_query_when_no_symbol_and_max_two_libraries() -> None:
+    assert docs_lookup.build_queries(docs_lookup.detect_imports("import requests\n")) == [
+        "requests documentation",
+    ]
+    assert docs_lookup.build_queries(
+        docs_lookup.detect_imports("import requests as req\n")
+    ) == ["requests documentation"]
+
+    hits = docs_lookup.detect_imports(
+        "from fastapi import Depends\nfrom pydantic import BaseModel\nimport httpx\n"
+    )
+    assert docs_lookup.build_queries(hits) == [
+        "fastapi Depends documentation",
+        "pydantic BaseModel documentation",
+    ]
+    assert len(docs_lookup.build_queries(hits, limit=docs_lookup.MAX_QUERIES)) == 2
+
+
+def test_lookup_prefers_changed_attributes_and_drops_off_topic_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[str, list[str] | None]] = []
+
+    class Client:
+        def __init__(self, api_key: str) -> None:
+            pass
+
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
+            seen.append((query, include_domains))
+            if query == "requests get documentation":
+                return {"results": [
+                    {
+                        "title": "CodeRabbit changelog",
+                        "url": "https://coderabbit.ai/changelog",
+                        "content": "Improved review comments.",
+                    },
+                    {
+                        "title": "requests",
+                        "url": "https://requests.readthedocs.io/en/latest/api/",
+                        "content": "requests get sends a GET request.",
+                    },
+                ]}
+            if query.startswith("requests"):
+                return {"results": [{
+                    "title": "CodeRabbit changelog",
+                    "url": "https://coderabbit.ai/changelog",
+                    "content": "Improved review comments.",
+                }]}
+            return {"results": [
+                {
+                    "title": "HTTPX",
+                    "url": "https://www.python-httpx.org/",
+                    "content": "httpx is an HTTP client.",
+                },
+            ]}
+
+    monkeypatch.setattr(docs_lookup, "TavilyClient", Client)
+    _enable(monkeypatch)
+    head = "import requests\n\ndef old(url):\n    return requests.post(url)\n"
+    diff = _diff(
+        "diff --git a/app.py b/app.py",
+        "@@ -2,2 +2,3 @@",
+        " def old(url):",
+        "     return requests.post(url)",
+        "+    return requests.get(url)",
+    )
+    snippets = docs_lookup.lookup([head, diff], paths=["app.py"])
+    assert seen == [(
+        "requests get documentation",
+        ["requests.readthedocs.io"],
+    )]
+    assert [item.url for item in snippets] == [
+        "https://requests.readthedocs.io/en/latest/api/",
+    ]
+
+    docs_lookup.clear_cache()
+    seen.clear()
+    mixed = docs_lookup.lookup(["import requests\nimport httpx\n"])
+    assert seen == [
+        ("requests documentation", ["requests.readthedocs.io"]),
+        ("httpx documentation", None),
+    ]
+    assert [item.url for item in mixed] == ["https://www.python-httpx.org/"]
+
+
+def test_relevance_filter_returns_empty_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Client:
+        def __init__(self, api_key: str) -> None:
+            pass
+
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
+            return {"results": [{
+                "title": "CodeRabbit changelog",
+                "url": "https://coderabbit.ai/changelog",
+                "content": "Improved review comments.",
+            }]}
+
+    monkeypatch.setattr(docs_lookup, "TavilyClient", Client)
+    _enable(monkeypatch)
+    assert docs_lookup.lookup(["import requests\n"]) == []
+
+
+def test_include_domains_only_for_known_libraries(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, list[str] | None]] = []
+
+    class Client:
+        def __init__(self, api_key: str) -> None:
+            pass
+
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
+            seen.append((query, include_domains))
+            library = query.split()[0]
+            return {"results": [{
+                "title": library,
+                "url": f"https://example.com/{library}",
+                "content": f"{library} documentation",
+            }]}
+
+    monkeypatch.setattr(docs_lookup, "TavilyClient", Client)
+    _enable(monkeypatch)
+    docs_lookup.lookup(["import httpx\nfrom fastapi import Depends\nimport pydantic\n"])
+    assert seen == [
+        ("httpx documentation", None),
+        ("fastapi Depends documentation", ["fastapi.tiangolo.com"]),
+    ]
+
+    docs_lookup.clear_cache()
+    seen.clear()
+    docs_lookup.lookup(["from pydantic import BaseModel\nimport { useEffect } from 'react'\n"])
+    assert seen == [
+        ("pydantic BaseModel documentation", ["docs.pydantic.dev"]),
+        ("react useEffect documentation", ["react.dev"]),
+    ]
+
+
+def test_client_omits_include_domains_unless_passed(monkeypatch: pytest.MonkeyPatch) -> None:
+    bodies: list[dict] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"results": []}
+
+    def fake_post(url: str, json: dict | None = None, headers: dict | None = None, timeout: float | None = None):
+        bodies.append({"url": url, "json": json})
+        return Response()
+
+    monkeypatch.setattr(docs_lookup.httpx, "post", fake_post)
+    client = docs_lookup.TavilyClient(api_key="test-key")
+    client.search("httpx documentation", max_results=3, timeout=8)
+    client.search(
+        "requests documentation",
+        max_results=3,
+        timeout=8,
+        include_domains=["requests.readthedocs.io"],
+    )
+    assert "include_domains" not in bodies[0]["json"]
+    assert bodies[1]["json"]["include_domains"] == ["requests.readthedocs.io"]
+    assert bodies[0]["json"]["query"] == "httpx documentation"
+    assert bodies[1]["json"]["api_key"] == "test-key"
+    assert bodies[0]["url"] == docs_lookup.SEARCH_URL
 
 
 def test_noop_without_key_does_not_construct_a_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,12 +512,19 @@ def test_returned_snippets_never_contain_the_api_key(monkeypatch: pytest.MonkeyP
         def __init__(self, api_key: str) -> None:
             calls.append("init")
 
-        def search(self, query: str, *, max_results: int, timeout: float) -> dict:
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
             calls.append("search")
             return {"results": [{
                 "title": SECRET,
                 "url": "https://example.com/docs",
-                "content": f"token {SECRET} in the page",
+                "content": f"requests token {SECRET} in the page",
             }]}
 
     monkeypatch.setattr(docs_lookup, "TavilyClient", Client)
@@ -229,11 +551,23 @@ def test_snippets_are_trimmed_and_cached(monkeypatch: pytest.MonkeyPatch) -> Non
         def __init__(self, api_key: str) -> None:
             calls.append("init")
 
-        def search(self, query: str, *, max_results: int, timeout: float) -> dict:
+        def search(
+            self,
+            query: str,
+            *,
+            max_results: int,
+            timeout: float,
+            include_domains: list[str] | None = None,
+        ) -> dict:
             calls.append(("search", query, max_results, timeout))
+            library = query.split()[0]
             return {
                 "results": [
-                    {"title": f"T{i}", "url": f"https://example.com/{i}", "content": "y" * 5000}
+                    {
+                        "title": f"{library} T{i}",
+                        "url": f"https://example.com/{i}",
+                        "content": "y" * 5000,
+                    }
                     for i in range(5)
                 ]
             }

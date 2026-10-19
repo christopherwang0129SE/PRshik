@@ -5,6 +5,13 @@ no-op (no network) when the key is empty, ``TAVILY_ENABLED`` is false, or the
 code only imports the standard library, relative modules, or the project
 itself. Search failures are logged and swallowed: analysis still finishes.
 
+Queries name up to two symbols from the conflicting lines (imported names, or
+attributes called on the module alias). A library with no symbol falls back to
+``"<library> documentation"``. ``requests``, ``fastapi``, ``pydantic``, and
+``react`` also send ``include_domains`` for their official docs host. Hits
+whose title and content never mention the library are dropped; that is not
+an error.
+
 ``tavily-python`` 0.5.0 hardcodes a 100s ``requests`` timeout, so the call is
 an httpx POST to ``https://api.tavily.com/search`` bounded by
 ``TAVILY_TIMEOUT_SECONDS``. Results are cached in-process per query.
@@ -28,8 +35,17 @@ logger = logging.getLogger(__name__)
 CONTENT_BUDGET = 2000
 PER_SNIPPET_CHARS = 700
 MAX_QUERIES = 2
+MAX_SYMBOLS = 2
 SEARCH_URL = "https://api.tavily.com/search"
 DOCS_HEADING = "Library documentation (via Tavily web search)"
+
+# Official docs hosts. Anything else is left to the query string.
+_OFFICIAL_DOMAINS = {
+    "requests": "requests.readthedocs.io",
+    "fastapi": "fastapi.tiangolo.com",
+    "pydantic": "docs.pydantic.dev",
+    "react": "react.dev",
+}
 
 _STDLIB = {name.lower() for name in sys.stdlib_module_names}
 _STDLIB.add("__future__")
@@ -74,6 +90,9 @@ _cache_lock = threading.Lock()
 class ImportHit:
     library: str
     symbol: str
+    # Binding used to find call sites. ``import requests as req`` stores ``req``
+    # here and leaves ``symbol`` empty. Hits returned for a query leave it empty.
+    local: str = ""
 
 
 @dataclass(frozen=True)
@@ -95,18 +114,29 @@ class TavilyClient:
     def __repr__(self) -> str:
         return "TavilyClient(api_key='[redacted]')"
 
-    def search(self, query: str, *, max_results: int, timeout: float) -> dict:
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int,
+        timeout: float,
+        include_domains: list[str] | None = None,
+    ) -> dict:
+        body: dict[str, object] = {
+            "api_key": self._api_key,
+            "query": query,
+            "topic": "general",
+            "search_depth": "basic",
+            "max_results": max_results,
+            "include_answer": False,
+            "include_raw_content": False,
+        }
+        # Omitted entirely for libraries without a known docs host.
+        if include_domains:
+            body["include_domains"] = list(include_domains)
         response = httpx.post(
             SEARCH_URL,
-            json={
-                "api_key": self._api_key,
-                "query": query,
-                "topic": "general",
-                "search_depth": "basic",
-                "max_results": max_results,
-                "include_answer": False,
-                "include_raw_content": False,
-            },
+            json=body,
             headers={"Content-Type": "application/json"},
             timeout=timeout,
         )
@@ -159,14 +189,17 @@ def _timeout() -> float:
     return value if value > 0 else 8.0
 
 
+def _looks_like_diff(text: str) -> bool:
+    return text.startswith(("diff ", "@@")) or "\n@@" in text or "\ndiff " in text
+
+
 def _normalize_source(text: str) -> str:
     """Drop unified-diff furniture so ``+import requests`` parses as source.
 
     Applied only to text that looks like a diff. A raw file is returned as-is,
     so a line that happens to start with ``+`` is left alone.
     """
-    is_diff = text.startswith(("diff ", "@@")) or "\n@@" in text or "\ndiff " in text
-    if not is_diff:
+    if not _looks_like_diff(text):
         return text
     kept: list[str] = []
     for line in text.splitlines():
@@ -177,6 +210,100 @@ def _normalize_source(text: str) -> str:
         else:
             kept.append(line)
     return "\n".join(kept)
+
+
+def _changed_lines(text: str) -> list[str]:
+    """Added and removed source lines. Empty when ``text`` is not a diff."""
+    if not _looks_like_diff(text):
+        return []
+    lines: list[str] = []
+    for line in text.splitlines():
+        if line.startswith(("diff ", "index ", "@@", "+++", "---", "\\")):
+            continue
+        if line[:1] in "+-" and line[1:].strip():
+            lines.append(line[1:])
+    return lines
+
+
+def _is_import_line(line: str) -> bool:
+    stripped = line.strip()
+    for keyword in ("import", "from", "export"):
+        if not stripped.startswith(keyword):
+            continue
+        if len(stripped) == len(keyword):
+            return True
+        if stripped[len(keyword)] in " \t'\"{*(":
+            return True
+    return False
+
+
+def _import_spans(text: str) -> list[tuple[int, int]]:
+    """Character ranges covered by import statements, including continuations.
+
+    A parenthesized ``from x import (`` or a braced ``import {`` keeps the
+    following lines inside the statement until the bracket closes. Otherwise
+    ``Depends`` on its own continuation line looks like a use.
+    """
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    depth = 0
+    for line in text.splitlines(keepends=True):
+        start = offset
+        end = offset + len(line)
+        offset = end
+        if depth > 0 or _is_import_line(line):
+            spans.append((start, end))
+            depth += line.count("(") + line.count("{") + line.count("[")
+            depth -= line.count(")") + line.count("}") + line.count("]")
+            if depth < 0:
+                depth = 0
+    return spans
+
+
+def _in_spans(spans: list[tuple[int, int]], pos: int) -> bool:
+    for start, end in spans:
+        if start <= pos < end:
+            return True
+        if start > pos:
+            return False
+    return False
+
+
+_ATTR_IDENT = r"[A-Za-z_$][\w$]*"
+
+
+def _ident_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<![\w$]){re.escape(name)}(?![\w$])")
+
+
+def _official_domains(library: str) -> list[str] | None:
+    domain = _OFFICIAL_DOMAINS.get(library.casefold())
+    if not domain:
+        return None
+    return [domain]
+
+
+def _query_library(query: str) -> str:
+    stripped = query.strip()
+    if not stripped:
+        return ""
+    return stripped.split(maxsplit=1)[0]
+
+
+def _mentions_library(item: dict[str, str], library: str) -> bool:
+    if not library:
+        return True
+    haystack = f"{item.get('title', '')}\n{item.get('content', '')}".casefold()
+    return library.casefold() in haystack
+
+
+def _drop_prefixes(symbols: list[str]) -> list[str]:
+    """Drop ``Session`` when ``Session.mount`` is already in the list."""
+    return [
+        symbol
+        for symbol in symbols
+        if not any(other != symbol and other.startswith(symbol + ".") for other in symbols)
+    ]
 
 
 def _project_index(paths: list[str]) -> tuple[set[str], list[str]]:
@@ -203,30 +330,82 @@ def _is_local_module(module: str, tops: set[str], no_exts: list[str]) -> bool:
     return any(path == dotted or path.endswith("/" + dotted) for path in no_exts)
 
 
-def _imported_names(raw: str) -> list[str]:
-    names: list[str] = []
-    for part in raw.split("#", 1)[0].replace("(", " ").replace(")", " ").split(","):
-        token = part.strip().split()
-        if not token or token[0] in {"*", "as"}:
+def _imported_pairs(raw: str) -> list[tuple[str, str]]:
+    """``(public_name, local_name)`` from a ``from module import ...`` list."""
+    pairs: list[tuple[str, str]] = []
+    text = raw.split("#", 1)[0].replace("(", " ").replace(")", " ")
+    for part in text.split(","):
+        tokens = part.strip().split()
+        if not tokens or tokens[0] in {"*", "as"}:
             continue
-        if _NAME.match(token[0]):
-            names.append(token[0])
-    return names
+        public = tokens[0]
+        if not _NAME.match(public):
+            continue
+        local = public
+        if "as" in tokens:
+            at = tokens.index("as")
+            if at + 1 < len(tokens) and _NAME.match(tokens[at + 1]):
+                local = tokens[at + 1]
+        pairs.append((public, local))
+    return pairs
 
 
-def _js_symbol(clause: str | None) -> str:
+def _py_import_bindings(raw: str) -> list[tuple[str, str]]:
+    """``(module, local_name)`` from ``import a, b as c``."""
+    bindings: list[tuple[str, str]] = []
+    for part in raw.split(","):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        module = tokens[0]
+        if not re.match(r"^[\w.]+$", module):
+            continue
+        local = module.split(".")[0]
+        if "as" in tokens:
+            at = tokens.index("as")
+            if at + 1 < len(tokens) and _NAME.match(tokens[at + 1]):
+                local = tokens[at + 1]
+        bindings.append((module, local))
+    return bindings
+
+
+def _js_bindings(clause: str | None) -> list[tuple[str, str]]:
+    """``(local_name, public_symbol)`` from an ES import clause.
+
+    A default or namespace import binds a module alias, so the public symbol
+    is empty. Named imports keep the exported name (``useEffect as effect``
+    documents ``useEffect`` and matches calls to ``effect``).
+    """
     if not clause:
-        return ""
-    text = clause.strip()
-    if not text.startswith("{"):
-        return ""
-    inner = text[1:].split("}", 1)[0]
-    for chunk in inner.split(","):
-        chunk = re.sub(r"^type\s+", "", chunk.strip())
-        name = chunk.split(" as ")[0].strip()
-        if _JS_NAME.match(name) and name not in {"type", "default"}:
-            return name
-    return ""
+        return []
+    text = " ".join(clause.strip().split())
+    if text.startswith("{"):
+        inner = text[1:].split("}", 1)[0]
+        found: list[tuple[str, str]] = []
+        for chunk in inner.split(","):
+            chunk = re.sub(r"^type\s+", "", chunk.strip())
+            parts = chunk.split()
+            if not parts:
+                continue
+            public = parts[0]
+            local = public
+            if "as" in parts:
+                at = parts.index("as")
+                if at + 1 < len(parts):
+                    local = parts[at + 1]
+            if (
+                _JS_NAME.match(public)
+                and public not in {"type", "default"}
+                and _JS_NAME.match(local)
+            ):
+                found.append((local, public))
+        return found
+    namespace = re.fullmatch(r"\*\s+as\s+([\w$]+)", text)
+    if namespace:
+        return [(namespace.group(1), "")]
+    if _JS_NAME.match(text):
+        return [(text, "")]
+    return []
 
 
 def _js_package(spec: str) -> str | None:
@@ -265,6 +444,7 @@ def _add_python_module(
     start: int,
     module: str,
     symbol: str,
+    local: str,
     tops: set[str],
     no_exts: list[str],
 ) -> None:
@@ -276,7 +456,7 @@ def _add_python_module(
     library = module.split(".")[0]
     if not library or _is_stdlib(library):
         return
-    found.append((start, ImportHit(library=library, symbol=symbol)))
+    found.append((start, ImportHit(library=library, symbol=symbol, local=local or symbol)))
 
 
 def _is_stdlib(module: str) -> bool:
@@ -288,11 +468,20 @@ def detect_imports(text: str, paths: list[str] | None = None) -> list[ImportHit]
 
     Stdlib, Node built-ins, relative imports, and modules that correspond to
     ``paths`` (the pair's own files) are dropped. Order follows the source.
+    On a diff, symbols that show up on added or removed lines replace imports
+    the hunk never uses. A bare module import keeps an empty symbol.
     """
-    return _detect(_normalize_source(text), paths or [])
+    paths = list(paths or [])
+    normalized = _normalize_source(text)
+    hits = _statement_hits(normalized, paths)
+    if _looks_like_diff(text):
+        usage = "\n".join(_changed_lines(text))
+    else:
+        usage = normalized
+    return _apply_usage(hits, usage, context=normalized)
 
 
-def _detect(text: str, paths: list[str]) -> list[ImportHit]:
+def _statement_hits(text: str, paths: list[str]) -> list[ImportHit]:
     tops, no_exts = _project_index(paths)
     found: list[tuple[int, ImportHit]] = []
 
@@ -302,26 +491,38 @@ def _detect(text: str, paths: list[str]) -> list[ImportHit]:
         if dots or not module:
             continue
         raw_names = match.group("paren") if match.group("paren") is not None else match.group("flat") or ""
-        names = _imported_names(raw_names)
-        _add_python_module(found, match.start(), module, names[0] if names else "", tops, no_exts)
+        pairs = _imported_pairs(raw_names)
+        if not pairs:
+            _add_python_module(found, match.start(), module, "", "", tops, no_exts)
+        else:
+            for public, local in pairs:
+                _add_python_module(found, match.start(), module, public, local, tops, no_exts)
 
     for match in _PY_IMPORT.finditer(text):
         raw = match.group("mods")
         # ``import x from 'react'`` and ``require('x')`` are JavaScript.
         if "'" in raw or '"' in raw or re.search(r"\bfrom\b", raw):
             continue
-        for module in _py_modules(raw):
-            _add_python_module(found, match.start(), module, "", tops, no_exts)
+        for module, local in _py_import_bindings(raw):
+            _add_python_module(found, match.start(), module, "", local, tops, no_exts)
 
-    def add_js(start: int, spec: str, symbol: str) -> None:
+    def add_js(start: int, spec: str, symbol: str, local: str = "") -> None:
         if _js_is_local(spec, paths):
             return
         name = _js_package(spec)
         if name:
-            found.append((start, ImportHit(library=name, symbol=symbol)))
+            found.append((
+                start,
+                ImportHit(library=name, symbol=symbol, local=local or symbol),
+            ))
 
     for match in _JS_FROM.finditer(text):
-        add_js(match.start(), match.group("spec"), _js_symbol(match.group("clause")))
+        bindings = _js_bindings(match.group("clause"))
+        if bindings:
+            for local, public in bindings:
+                add_js(match.start(), match.group("spec"), public, local)
+        else:
+            add_js(match.start(), match.group("spec"), "")
     for match in _JS_BARE.finditer(text):
         add_js(match.start(), match.group("spec"), "")
     for match in _JS_REQUIRE.finditer(text):
@@ -331,23 +532,148 @@ def _detect(text: str, paths: list[str]) -> list[ImportHit]:
     return [hit for _start, hit in found]
 
 
-def _py_modules(raw: str) -> list[str]:
-    modules: list[str] = []
-    for part in raw.split(","):
-        token = part.strip().split()
-        if not token:
+def _call_symbols(
+    hits: list[ImportHit],
+    *,
+    context: str,
+    usage: str,
+) -> list[tuple[str, str, int]]:
+    """``(library, symbol, position)`` for attribute calls inside ``usage``.
+
+    ``session = requests.Session()`` may sit outside the hunk. The assignment
+    is resolved from ``context``; only ``session.mount`` / ``requests.get``
+    that appear in ``usage`` become symbols.
+    """
+    if not usage.strip():
+        return []
+    aliases: list[tuple[str, str]] = []
+    seen_alias: set[tuple[str, str]] = set()
+    for hit in hits:
+        if hit.symbol or not hit.local:
             continue
-        name = token[0]
-        if re.match(r"^[\w.]+$", name):
-            modules.append(name)
-    return modules
+        key = (hit.local, hit.library)
+        if key in seen_alias:
+            continue
+        seen_alias.add(key)
+        aliases.append(key)
+
+    constructors: dict[str, tuple[str, str]] = {}
+    if context:
+        for local, library in aliases:
+            assign = re.compile(
+                rf"(?<![\w$])(?P<var>{_ATTR_IDENT})\s*=\s*"
+                rf"{re.escape(local)}\.(?P<cls>{_ATTR_IDENT})\s*\("
+            )
+            for match in assign.finditer(context):
+                cls = match.group("cls")
+                if cls[:1].isupper():
+                    constructors[match.group("var")] = (library, cls)
+
+    found: list[tuple[str, str, int]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(library: str, symbol: str, pos: int) -> None:
+        key = (library, symbol)
+        if not symbol or key in seen:
+            return
+        seen.add(key)
+        found.append((library, symbol, pos))
+
+    for local, library in aliases:
+        attr = re.compile(
+            rf"(?<![\w$]){re.escape(local)}\.(?P<attr>{_ATTR_IDENT})"
+        )
+        for match in attr.finditer(usage):
+            add(library, match.group("attr"), match.start())
+        chained = re.compile(
+            rf"(?<![\w$]){re.escape(local)}\.(?P<cls>{_ATTR_IDENT})\s*\("
+            rf"[^)]*\)\s*\.(?P<meth>{_ATTR_IDENT})"
+        )
+        for match in chained.finditer(usage):
+            cls = match.group("cls")
+            if cls[:1].isupper():
+                add(library, f"{cls}.{match.group('meth')}", match.start())
+
+    for var, (library, cls) in constructors.items():
+        method = re.compile(rf"(?<![\w$]){re.escape(var)}\.(?P<meth>{_ATTR_IDENT})")
+        for match in method.finditer(usage):
+            add(library, f"{cls}.{match.group('meth')}", match.start())
+
+    found.sort(key=lambda item: (item[2], item[0], item[1]))
+    return found
+
+
+def _first_code_pos(text: str, spans: list[tuple[int, int]], name: str) -> int | None:
+    if not name:
+        return None
+    for match in _ident_pattern(name).finditer(text):
+        if not _in_spans(spans, match.start()):
+            return match.start()
+    return None
+
+
+def _apply_usage(hits: list[ImportHit], usage: str, *, context: str) -> list[ImportHit]:
+    """Prefer symbols that occur in ``usage`` over imported names that do not.
+
+    ``usage`` is the changed lines of a diff, or the whole file when the text
+    is not a diff. Imported names still fill the query when nothing in
+    ``usage`` names a symbol.
+    """
+    calls: dict[str, list[tuple[int, str]]] = {}
+    for library, symbol, pos in _call_symbols(hits, context=context, usage=usage):
+        calls.setdefault(library, []).append((pos, symbol))
+    spans = _import_spans(usage)
+
+    grouped: list[tuple[str, list[ImportHit]]] = []
+    index: dict[str, int] = {}
+    for hit in hits:
+        slot = index.get(hit.library)
+        if slot is None:
+            index[hit.library] = len(grouped)
+            grouped.append((hit.library, []))
+            slot = index[hit.library]
+        grouped[slot][1].append(hit)
+
+    selected: list[ImportHit] = []
+    for library, group in grouped:
+        imported: list[tuple[str, str]] = []
+        seen_symbol: set[str] = set()
+        for hit in group:
+            if not hit.symbol or hit.symbol in seen_symbol:
+                continue
+            seen_symbol.add(hit.symbol)
+            imported.append((hit.symbol, hit.local or hit.symbol))
+
+        used: list[tuple[int, str]] = []
+        used_seen: set[str] = set()
+        for symbol, local in imported:
+            pos = _first_code_pos(usage, spans, local)
+            if pos is None or symbol in used_seen:
+                continue
+            used_seen.add(symbol)
+            used.append((pos, symbol))
+        for pos, symbol in calls.get(library, []):
+            if symbol in used_seen:
+                continue
+            used_seen.add(symbol)
+            used.append((pos, symbol))
+        used.sort(key=lambda item: (item[0], item[1]))
+        symbols = _drop_prefixes([symbol for _pos, symbol in used])
+        if not symbols:
+            symbols = [symbol for symbol, _local in imported]
+        if symbols:
+            selected.extend(ImportHit(library=library, symbol=symbol) for symbol in symbols)
+        else:
+            selected.append(ImportHit(library=library, symbol=""))
+    return selected
 
 
 def build_queries(hits: list[ImportHit], *, limit: int = MAX_QUERIES) -> list[str]:
     """At most ``limit`` queries, in source order, one per library.
 
-    A later import of the same library can add a symbol the first one lacked
-    (``import fastapi`` then ``from fastapi import FastAPI``).
+    Each query names up to ``MAX_SYMBOLS`` symbols. A later import can still
+    fill a symbol the first one lacked (``import fastapi`` then ``from fastapi
+    import FastAPI``). No symbol at all becomes ``"<library> documentation"``.
     """
     chosen: list[list[str]] = []
     index: dict[str, int] = {}
@@ -357,18 +683,19 @@ def build_queries(hits: list[ImportHit], *, limit: int = MAX_QUERIES) -> list[st
             if len(chosen) >= limit:
                 continue
             index[hit.library] = len(chosen)
-            chosen.append([hit.library, hit.symbol])
-            continue
-        if not chosen[slot][1] and hit.symbol:
-            chosen[slot][1] = hit.symbol
+            chosen.append([hit.library])
+            slot = index[hit.library]
+        symbol = " ".join(hit.symbol.split())
+        if symbol and symbol not in chosen[slot][1:] and len(chosen[slot]) - 1 < MAX_SYMBOLS:
+            chosen[slot].append(symbol)
     queries: list[str] = []
-    for library, symbol in chosen:
-        library = " ".join(library.split())
-        symbol = " ".join(symbol.split())
+    for parts in chosen:
+        library = " ".join(parts[0].split())
         if not library:
             continue
-        if symbol:
-            queries.append(f"{library} {symbol} documentation")
+        symbols = parts[1:]
+        if symbols:
+            queries.append(f"{library} {' '.join(symbols)} documentation")
         else:
             queries.append(f"{library} documentation")
     return queries
@@ -406,9 +733,19 @@ def lookup(texts: list[str], paths: list[str] | None = None) -> list[DocSnippet]
     if not active():
         return []
     try:
-        chunks = [_normalize_source(text) for text in texts if text and text.strip()]
-        hits = _detect("\n".join(chunks), list(paths or []))
-        queries = build_queries(hits)
+        raws = [text for text in texts if text and text.strip()]
+        norms = [_normalize_source(text) for text in raws]
+        hits = _statement_hits("\n".join(norms), list(paths or []))
+        # File heads carry imports that the hunk did not touch. Attribute
+        # calls count only on added or removed lines when any text is a diff,
+        # so an unchanged ``requests.post`` does not crowd out ``requests.get``.
+        if any(_looks_like_diff(text) for text in raws):
+            usage = "\n".join(line for text in raws for line in _changed_lines(text))
+            context = "\n".join(norms)
+        else:
+            usage = "\n".join(norms)
+            context = usage
+        queries = build_queries(_apply_usage(hits, usage, context=context))
         if not queries:
             return []
         return _collect(queries)
@@ -491,12 +828,23 @@ def _search_cached(query: str) -> list[dict[str, str]]:
         cached = _cache.get(key)
     if cached is not None:
         return cached
+    library = _query_library(query)
+    domains = _official_domains(library)
     try:
-        payload = TavilyClient(api_key=settings.tavily_api_key.strip()).search(
-            query,
-            max_results=_max_results(),
-            timeout=_timeout(),
-        )
+        client = TavilyClient(api_key=settings.tavily_api_key.strip())
+        if domains:
+            payload = client.search(
+                query,
+                max_results=_max_results(),
+                timeout=_timeout(),
+                include_domains=domains,
+            )
+        else:
+            payload = client.search(
+                query,
+                max_results=_max_results(),
+                timeout=_timeout(),
+            )
     except Exception as exc:
         # The exception text can quote the request. Log only the type.
         logger.warning(
@@ -511,6 +859,11 @@ def _search_cached(query: str) -> list[dict[str, str]]:
         return []
     cleaned = [_public_result(item) for item in raw]
     cleaned = [item for item in cleaned if item is not None]
+    try:
+        cleaned = [item for item in cleaned if _mentions_library(item, library)]
+    except Exception:
+        # A bad hit must not fail the lookup. Keep the unfiltered list.
+        logger.warning("Tavily relevance filter failed query=%s", _redact(query)[:200])
     with _cache_lock:
         _cache[key] = cleaned
     return cleaned
