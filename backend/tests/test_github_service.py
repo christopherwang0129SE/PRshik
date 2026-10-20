@@ -201,3 +201,103 @@ def test_sync_endpoint_returns_pull_requests_and_risk_analysis(
     assert result.repository == "example/project"
     assert result.pull_requests == [pull]
     assert result.analysis == analysis
+
+
+def test_review_queue_marks_pull_without_reviewers_as_needs_reviewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange: one PR by "seated" with nobody requested.
+    pull = GitHubPullRequest(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        head_branch="feature-7",
+        base_branch="main",
+        updated_at="2026-10-04T10:00:00Z",
+        requested_reviewers=[], 
+    )
+    monkeypatch.setattr(
+        github_service, "list_open_pull_requests", lambda *args, **kwargs: [pull]
+    )
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, Any]]:
+            return []  # BLANK 2: no reviews and no timeline events
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def get(self, url: str, *, params: dict[str, Any]) -> Response:
+            return Response()
+
+    monkeypatch.setattr(github_service.httpx, "Client", Client)
+
+    # Act
+    items = github_service.list_review_queue(
+        "example/project", {"seated", "reviewer"}, "main", review_sla_hours=24
+    )
+
+    # Assert
+    assert len(items) == 1
+    assert items[0].status == 'needs_reviewer'  # BLANK 3: the status we expect, as a string
+
+
+def test_review_queue_marks_pull_with_seated_approval_as_approved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange: one PR by "seated" with nobody requested.
+    pull = GitHubPullRequest(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        head_branch="feature-7",
+        base_branch="main",
+        updated_at="2026-10-04T10:00:00Z",
+        requested_reviewers=[], 
+    )
+    monkeypatch.setattr(
+        github_service, "list_open_pull_requests", lambda *args, **kwargs: [pull]
+    )
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, Any]]:
+            return [{"user": {"login": "reviewer"}, "state": "APPROVED"}]
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def get(self, url: str, *, params: dict[str, Any]) -> Response:
+            return Response()
+
+    monkeypatch.setattr(github_service.httpx, "Client", Client)
+
+    # Act
+    items = github_service.list_review_queue(
+        "example/project", {"seated", "reviewer"}, "main", review_sla_hours=24
+    )
+
+    # Assert
+    assert len(items) == 1
+    assert items[0].status == 'approved'
