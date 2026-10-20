@@ -75,15 +75,6 @@ class Settings(BaseSettings):
     # Results requested per query. Snippets are then trimmed to a small budget.
     tavily_max_results: int = 3
 
-    # --- GitHub pull-request integration ---
-    github_repository: str = ""
-    github_token: str = ""
-    github_seated_users: str = ""
-
-    # --- App ---
-    default_base_branch: str = "main"
-    # Where cloned demo repos are cached.
-    workspace_dir: str = ".workspace"
     # Comma-separated browser origins. Default is the local Vite server.
     # Read once, when the process starts.
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
@@ -95,6 +86,16 @@ class Settings(BaseSettings):
     # demo repositories. repo_url and any other path return 403. Default false
     # so a local server can still analyze other repos.
     demo_mode: bool = False
+
+    # --- GitHub pull-request integration ---
+    github_repository: str = ""
+    github_token: str = ""
+    github_seated_users: str = ""
+
+    # --- App ---
+    default_base_branch: str = "main"
+    # Where cloned demo repos are cached.
+    workspace_dir: str = ".workspace"
 
     @property
     def nebius_ready(self) -> bool:

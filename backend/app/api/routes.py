@@ -14,6 +14,8 @@ from typing import Protocol
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.services import verifier
+
 from app.config import settings
 from app.schemas import (
     AnalyzeRequest,
@@ -23,7 +25,7 @@ from app.schemas import (
     PairDiffResponse,
     PairRisk,
 )
-from app.services import git_service, github_service, sentinel, verifier
+from app.services import git_service, github_service, sentinel
 
 router = APIRouter()
 
