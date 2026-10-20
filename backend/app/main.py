@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
+from app.config import cors_middleware_kwargs
 
 app = FastAPI(
     title="MergeGuard Sentinel",
@@ -12,12 +13,7 @@ app = FastAPI(
     description="Predicts merge-conflict risk across in-flight branches.",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, **cors_middleware_kwargs())
 
 app.include_router(router, prefix="/api")
 

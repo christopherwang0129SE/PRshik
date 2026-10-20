@@ -1,0 +1,10 @@
+# Demo repos are generated locally and are not committed.
+checkout-demo/
+api-demo/
+
+# Real-world replays (demo/replay.py --case NAME): public repo clones + venvs, not committed.
+real-case-1/
+kiss/
+elastic/
+qwen-code/
+harmless-demo/
