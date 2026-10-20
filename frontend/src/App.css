@@ -621,9 +621,9 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 296px minmax(0, 1fr);
   align-items: start;
-  gap: var(--s6);
+  gap: var(--s5);
   margin-top: var(--s5);
 }
 
@@ -775,17 +775,16 @@
 .skeleton {
   display: block;
   border-radius: var(--r-control);
-  background: linear-gradient(90deg, var(--rule) 0%, color-mix(in srgb, var(--rule) 40%, transparent) 50%, var(--rule) 100%);
-  background-size: 200% 100%;
-  animation: shimmer 1.6s linear infinite;
+  background: var(--rule);
+  animation: shimmer 1.6s ease-in-out infinite alternate;
 }
 
 @keyframes shimmer {
   from {
-    background-position: 100% 0;
+    opacity: 0.45;
   }
   to {
-    background-position: -100% 0;
+    opacity: 1;
   }
 }
 
@@ -805,7 +804,7 @@
 /* ---------- Pair detail ---------- */
 
 .detail {
-  padding: var(--s6);
+  padding: var(--s5);
   border: 1px solid var(--rule);
   border-radius: var(--r-panel);
   background: var(--surface);
@@ -1445,11 +1444,7 @@
   padding: var(--s3);
   font-size: var(--t-xs);
   color: var(--ink-3);
-  background: repeating-linear-gradient(
-    135deg,
-    transparent 0 6px,
-    color-mix(in srgb, var(--rule) 55%, transparent) 6px 7px
-  );
+  background: var(--paper);
 }
 
 .sbs-row[data-overlap] {
@@ -1937,5 +1932,63 @@
 
 .summary-meta {
   font-weight: 400;
+  color: var(--ink-2);
+}
+
+/* Finished diagnostics stay available without delaying the pair verdicts. */
+.pipeline-history {
+  border-block: 1px solid var(--rule);
+}
+
+.pipeline-history > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 44px;
+  cursor: pointer;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.pipeline-history > summary::before {
+  content: '+';
+  width: 1ch;
+  font-family: var(--mono);
+}
+
+.pipeline-history[open] > summary::before {
+  content: '−';
+}
+
+.pipeline-history > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pipeline-history > summary span {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.pipeline-history > summary:hover {
+  color: var(--accent);
+}
+
+.pipeline-history .pipeline {
+  border: 0;
+  padding-inline: 0;
+}
+
+.stage-detail,
+.summary-detail,
+.failure-owner,
+.run-list,
+.more-note,
+.symbols,
+.block-sub {
+  overflow-wrap: anywhere;
+}
+
+.detail[data-verdict='pending'] .verdict-word,
+.index-row[data-verdict='pending'] .row-verdict {
   color: var(--ink-2);
 }

@@ -37,7 +37,7 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
  */
 export const Pipeline = ({ run, mode, elapsedS = 0, onCancel }: PipelineProps) => {
   const running = mode === 'live' || mode === 'blind';
-  return (
+  const content = (
     <section className="pipeline" data-mode={mode} aria-labelledby="pipeline-heading" data-testid="pipeline">
       <div className="pipeline-head">
         <h2 id="pipeline-heading" className="pipeline-title">
@@ -82,4 +82,10 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel }: PipelineProps) =
       )}
     </section>
   );
+  return mode === 'finished' ? (
+    <details className="pipeline-history">
+      <summary>Run details <span>Pipeline stages and timings</span></summary>
+      {content}
+    </details>
+  ) : content;
 };

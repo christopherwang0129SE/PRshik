@@ -89,6 +89,15 @@ describe('Pipeline', () => {
     expect(screen.getByTestId('stage-verify')).toHaveTextContent(/runs it on A, B, base and the merge/);
   });
 
+  it('folds completed progress so the verdict leads to the branch pairs', () => {
+    render(<Pipeline run={initialRun()} mode="finished" />);
+    const disclosure = screen.getByText('Run details').closest('details');
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(screen.getByTestId('pipeline')).not.toBeVisible();
+    disclosure?.setAttribute('open', '');
+    expect(screen.getByTestId('pipeline')).toBeVisible();
+  });
+
   it('lights stages from stream events, ticks the clock and cancels', () => {
     let state = initialRun();
     state = reduceRun(state, { type: 'stage', stage: 'diff', status: 'start', label: 'Diffing', t: 0.1 });
