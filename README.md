@@ -16,7 +16,7 @@ semantic clash by running tests on the merged result.
 |-------|------|--------|
 | **Sentinel** | *Predict* — scores conflict risk between every pair of in-flight branches from git hunk overlap, then optionally refines the riskiest pairs with NVIDIA Nemotron on Nebius Token Factory. | ✅ MVP |
 | **Planner** | *Prevent* — decomposes work into non-overlapping "zones" and suggests merge/rebase order. | ⏳ planned |
-| **Merger** | *Resolve* — semantic 3-way merge, then tests and an explanation of the resolution. | ⏳ planned |
+| **Merger** | *Resolve* — semantic 3-way merge; uses **Tavily** to check current library docs, runs tests, explains the resolution. | ⏳ planned |
 
 - **LLM:** NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) on Nebius Token Factory, an OpenAI-compatible API at `https://api.tokenfactory.nebius.com/v1/`
 - **Library docs:** Tavily, called at runtime by Sentinel and verify-by-test
@@ -585,13 +585,13 @@ backend/            FastAPI service
     main.py         entrypoint + CORS
     config.py       env-driven settings (Nebius/Tavily keys)
     schemas.py      API models
-    api/routes.py   /api/health (status, model, provider), /api/analyze, /api/github/pull-requests
+    api/routes.py   /api/health, /api/analyze
     services/
-      git_service.py  pure-git diff/branch helpers (subprocess), including PR ref fetch
+      git_service.py  pure-git diff/branch helpers (subprocess)
       github_service.py  open pull requests for seated authors (GitHub API)
       nemotron.py     Token Factory chat-completions client (Nemotron 3 Super)
       docs_lookup.py  Tavily library-doc lookup for the risk and verify prompts
-      sentinel.py     conflict-risk scoring (git, optional Nemotron blend)
+      sentinel.py     conflict-risk scoring
       prefilter.py    static symbol/call prefilter before any LLM call
       ts_symbols.py   TypeScript/JavaScript declarations, imports, re-exports for the prefilter
       cache.py        on-disk Nemotron result cache
