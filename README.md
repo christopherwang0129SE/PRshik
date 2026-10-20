@@ -1,14 +1,84 @@
 # MergeGuard
 
-**Project name: MergeGuard (final name pending).**
+MergeGuard catches branches that merge cleanly in Git but break together. Sentinel compares in-flight branches, uses NVIDIA Nemotron 3 Super on Nebius Token Factory to explain semantic risk, and checks the merged result with branch tests and generated intent tests. The dashboard and MCP tools return the risky pair and its test evidence. Built for the Nebius x NVIDIA hackathon; Tavily grounds model prompts with library documentation.
 
-**An agent-based system that minimises merge conflicts.**
-Built for the **Nebius x NVIDIA Global AI Hackathon** (Devpost; deadline Fri 30 Oct 2026, 18:00 Copenhagen time).
-Tavily is a sponsor-tool integration for library-doc lookup. It is not the name of the hackathon.
+## Run it in 2 commands
 
-Naive parallel development — whether by humans or a fleet of AI coding agents —
-collides. MergeGuard scores in-flight branches for conflict risk and proves a
-semantic clash by running tests on the merged result.
+Prerequisites: Python 3.11+, Node.js 22, Git 2.38+ and Make, on Linux or macOS.
+From the repository root:
+
+```bash
+make setup
+make dev
+```
+
+Open http://localhost:3000. Setup installs backend and frontend dependencies and
+creates both demo repositories. Dev starts FastAPI on `127.0.0.1:8000` and Vite on
+`127.0.0.1:3000`; Ctrl-C stops both. Those ports must be free.
+No keys are required for git scoring and deterministic branch tests.
+Optionally copy `.env.example` to `backend/.env` if you do not already have one,
+then set `NEBIUS_API_KEY` and optionally `TAVILY_API_KEY`. Never commit keys.
+
+## Run the demo scenario
+
+After setup, no server is needed:
+
+```bash
+make demo
+```
+
+This regenerates `demo/checkout-demo` and analyzes `feat/discount-cap` together
+with `feat/tax-before-discount` through the same function as `POST /api/analyze`.
+Git merges them cleanly, but the merged checkout computes **200 instead of 198**
+for the capped-discount test. With no keys, branch tests prove the regression
+and raise the pair to **90/100, high**. With an enabled Nebius key, Nemotron also
+assesses risk and eligible pairs get verify-by-test. The report names the proof
+path actually used, including a deterministic fallback if generation does not
+confirm. Exit code 0 means the pair was flagged and proven; otherwise it is nonzero.
+To force a keyless run even with a configured dotenv file:
+`NEBIUS_API_KEY= TAVILY_API_KEY= make demo`.
+
+In the dashboard, click **Try demo repo** for the same fixture (plus a harmless
+docs branch). **Try API demo (Tavily)** uses third-party libraries and exercises
+documentation lookup when both provider keys are configured.
+
+## Where Nebius / Nemotron is used
+
+`backend/app/services/nemotron.py` calls NVIDIA Nemotron 3 Super
+(`nvidia/nemotron-3-super-120b-a12b`) through Nebius Token Factory's OpenAI-compatible
+API. `sentinel.py` requests risk assessments after the static prefilter;
+`verifier.py` requests pytest intent tests, executes them in throwaway worktrees,
+and can repair them using test feedback. No enabled key means no model calls.
+
+## Where Tavily is used
+
+`backend/app/services/docs_lookup.py` finds third-party imports and relevant
+symbols in changed code, searches library documentation, and supplies bounded
+snippets to the risk and intent-test prompts. Source links appear in the
+dashboard and MCP results. Missing keys or failed searches do not block analysis.
+The checkout demo uses only the standard library, so it does not trigger Tavily;
+the API demo uses `requests` and `pydantic`.
+
+## Architecture
+
+```text
+Local branches -> Sentinel: git diff + static symbol/call prefilter
+                   |-> Branch tests on merge (no key) -----------|
+                   |-> Nemotron risk on Nebius Token Factory    |
+                   |       + Tavily library docs                |
+                   |       -> Verify-by-test (+ Tavily docs) ---|
+                   |                                            v
+                   +----------------------------> Scores + test evidence
+                                                       |          |
+                                                    FastAPI    MCP server
+                                                       |       (in-process)
+                                                    Dashboard
+```
+
+Both test layers use throwaway worktrees and execute only for allowed local
+repositories. Branch tests run before model scoring; generated tests run only
+for eligible high-risk pairs. FastAPI and the stdio MCP server share the engine;
+the MCP server does not need a running HTTP server.
 
 ## The three agents
 
@@ -62,7 +132,8 @@ Hosted demo (Vercel + Railway): [docs/DEPLOY.md](docs/DEPLOY.md).
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp ../.env.example .env
+# Only if backend/.env does not already exist:
+test -e .env || cp ../.env.example .env
 ```
 
 Edit `backend/.env`. Set `NEBIUS_API_KEY` for Nemotron. `TAVILY_API_KEY` is optional: leave it empty and library-doc lookup stays off. Never commit `backend/.env`.
@@ -114,8 +185,9 @@ scores** with human-readable rationales.
 
 ### Nemotron risk refinement
 
-With no API key, Sentinel is unchanged: each pair's `score`, `level`, and
-`rationale` come from git hunk overlap (including a 3-line adjacency window).
+With no API key, initial scores come from git hunk overlap (including a 3-line
+adjacency window). With verification requested for an allowed local repo, a
+confirmed branch test can still raise the displayed score and level.
 The response adds `score_source: "git"` and `fallback_reason: "no_api_key"`.
 
 To ask NVIDIA Nemotron 3 Super as well, copy `.env.example` to `backend/.env`
@@ -481,8 +553,9 @@ uv pip install --python .venv-mcp/bin/python -r backend/mergeguard_mcp/requireme
 
 The server reads `NEBIUS_API_KEY` from its environment. To keep the key out of
 client configs, point `MERGEGUARD_ENV_FILE` at a dotenv file; only `NEBIUS_*`
-entries are read from it. Without a key, scores come from the git heuristic
-and nothing is verified (the result says so in `note`).
+entries are read from it. Without a key, initial scores come from the git heuristic and generated intent
+tests are skipped. Branch tests can still confirm regressions on allowed local
+repos when verification is requested.
 
 Cursor (`.cursor/mcp.json` in your project, or `~/.cursor/mcp.json`):
 
@@ -599,7 +672,7 @@ backend/            FastAPI service
       branch_tests.py branch tests on merge (each branch's own tests on A+B, no LLM)
       js_tests.py     vitest/jest for branch tests: shared install per lockfile, minimal builds
   tests/
-frontend/           dashboard (to be scaffolded)
+frontend/           React dashboard
 docs/               customer discovery + notes
 ```
 
