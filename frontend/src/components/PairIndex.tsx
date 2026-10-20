@@ -36,7 +36,7 @@ export const PairIndex = ({ pairs, selectedKey, onSelect, live = false, pendingC
                 type="button"
                 className="index-row"
                 data-level={pair.level}
-                data-verdict={verdict}
+                data-verdict={live && verdict === 'clean' ? 'pending' : verdict}
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => onSelect(pair)}
                 data-testid="pair-row"
@@ -51,7 +51,7 @@ export const PairIndex = ({ pairs, selectedKey, onSelect, live = false, pendingC
                     {pair.branch_b}
                   </span>
                 </span>
-                <span className="row-verdict">{VERDICT_TEXT[verdict]}</span>
+                <span className="row-verdict">{live && verdict === 'clean' ? 'Awaiting verdict' : VERDICT_TEXT[verdict]}</span>
               </button>
             </li>
           );

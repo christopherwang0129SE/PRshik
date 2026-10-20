@@ -157,9 +157,10 @@ const Cost = ({ pair, usage }: { pair: PairRisk; usage?: UsageSummary | null }) 
  */
 export const PairDetail = ({ pair, source, baseBranch, usage, provisional = false, headingRef }: PairDetailProps) => {
   const verdict = pairVerdict(pair);
+  const awaitingVerdict = provisional && verdict === 'clean';
   const docs = usableDocs([...(pair.docs_sources ?? []), ...(pair.verification?.docs_sources ?? [])]);
   return (
-    <article className="detail" data-verdict={verdict} aria-labelledby="detail-heading" data-testid="pair-detail">
+    <article className="detail" data-verdict={awaitingVerdict ? 'pending' : verdict} aria-labelledby="detail-heading" data-testid="pair-detail">
       <header className="detail-head">
         <h2 id="detail-heading" className="detail-pair" ref={headingRef} tabIndex={-1}>
           <span className="pair-side">
@@ -173,8 +174,8 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
           </span>
         </h2>
         <p className="detail-verdict">
-          <span className="verdict-word">{VERDICT_TEXT[verdict]}</span>
-          <span className="verdict-why">{VERDICT_LINE[verdict]}</span>
+          <span className="verdict-word">{awaitingVerdict ? 'Awaiting verdict' : VERDICT_TEXT[verdict]}</span>
+          <span className="verdict-why">{awaitingVerdict ? 'Risk scoring and test checks are still running.' : VERDICT_LINE[verdict]}</span>
         </p>
         {provisional && <p className="detail-provisional">Still running: this pair may change when the tests finish.</p>}
       </header>

@@ -225,6 +225,13 @@ describe('App', () => {
     expect(screen.getByTestId('pair-detail')).toHaveTextContent('Still running');
 
     await act(async () => {
+      stream.push({ type: 'pair', pair: { ...CONFIRMED, branch_tests: null, score: 10, level: 'low', score_source: 'git', model_score: null }, t: 4.5 });
+    });
+    expect(screen.getByTestId('pair-row')).toHaveTextContent('Awaiting verdict');
+    expect(screen.getByTestId('pair-detail')).toHaveTextContent('Risk scoring and test checks are still running.');
+    expect(screen.queryByText('Nothing here needs attention.')).not.toBeInTheDocument();
+
+    await act(async () => {
       stream.push({ type: 'stage', stage: 'model', status: 'done', label: 'Scored', t: 5 });
       stream.push({ type: 'result', result: RESULT, t: 16.7 });
       stream.close();
