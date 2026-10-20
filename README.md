@@ -664,13 +664,13 @@ backend/            FastAPI service
       github_service.py  open pull requests for seated authors (GitHub API)
       nemotron.py     Token Factory chat-completions client (Nemotron 3 Super)
       docs_lookup.py  Tavily library-doc lookup for the risk and verify prompts
-      sentinel.py     conflict-risk scoring
       prefilter.py    static symbol/call prefilter before any LLM call
       ts_symbols.py   TypeScript/JavaScript declarations, imports, re-exports for the prefilter
       cache.py        on-disk Nemotron result cache
       verifier.py     verify-by-test (generated pytest in throwaway worktrees)
       branch_tests.py branch tests on merge (each branch's own tests on A+B, no LLM)
       js_tests.py     vitest/jest for branch tests: shared install per lockfile, minimal builds
+      sentinel.py     conflict-risk scoring
   tests/
 frontend/           React dashboard
 docs/               customer discovery + notes

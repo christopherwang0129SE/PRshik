@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     default_base_branch: str = "main"
     # Where cloned demo repos are cached.
     workspace_dir: str = ".workspace"
+
     @property
     def nebius_ready(self) -> bool:
         return self.nebius_enabled and bool(self.nebius_api_key.strip())
