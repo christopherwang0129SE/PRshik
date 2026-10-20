@@ -30,7 +30,7 @@
   --del-wash: #fcefed;
 
   --sans: 'Schibsted Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mono: 'Azeret Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Type scale, 16px body. */
   --t-xs: 0.8125rem; /* 13 */
