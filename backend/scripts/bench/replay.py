@@ -6,7 +6,8 @@
 
 ``main`` is ``a.parent``. Each change is applied onto ``main``: merge commits
 via ``git diff <parent> <sha> | git apply --3way`` (fallback ``cherry-pick -m 1``),
-squash/direct via ``git cherry-pick``. If B conflicts, branch ``b`` is absent.
+squash/direct via ``git cherry-pick``. If that fails and ``pr`` is an int on an
+owner repo, the branch is the fetched PR head; otherwise it is omitted.
 
 Replays depend on the src clone via ``.git/objects/info/alternates``.
 """
@@ -20,6 +21,7 @@ import re
 import shutil
 import subprocess
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 _NAME = "MergeGuard Bench"
@@ -66,7 +68,7 @@ def _hard_clean(repo: Path) -> None:
     _git(repo, "clean", "-fd", check=False)
 
 
-def _stage(repo: Path, change: dict) -> bool:
+def _stage(repo: Path, change: dict) -> str | None:
     sha = str(change["sha"])
     if change.get("kind") == "merge":
         parent = str(change.get("parent") or "")
@@ -74,16 +76,21 @@ def _stage(repo: Path, change: dict) -> bool:
         if diff.returncode == 0 and diff.stdout.strip():
             applied = _run(["apply", "--3way", "--index", "-"], repo=repo, input=diff.stdout)
             if applied.returncode == 0:
-                return True
+                return "apply-3way"
             _hard_clean(repo)
-        return _git(repo, "cherry-pick", "-n", "-m", "1", sha, check=False).returncode == 0
-    return _git(repo, "cherry-pick", "-n", sha, check=False).returncode == 0
+        if _git(repo, "cherry-pick", "-n", "-m", "1", sha, check=False).returncode == 0:
+            return "cherry-pick"
+        return None
+    if _git(repo, "cherry-pick", "-n", sha, check=False).returncode == 0:
+        return "cherry-pick"
+    return None
 
 
-def _apply(repo: Path, change: dict, branch: str) -> bool:
+def _apply(repo: Path, change: dict, branch: str) -> str | None:
     sha = str(change["sha"])
     _git(repo, "checkout", "-q", "-B", branch, "main")
-    staged = _stage(repo, change) and _git(repo, "diff", "--cached", "--quiet", check=False).returncode != 0
+    method = _stage(repo, change)
+    staged = method is not None and _git(repo, "diff", "--cached", "--quiet", check=False).returncode != 0
     message = _git(repo, "log", "-1", "--format=%B", sha, check=False).stdout if staged else ""
     committed = False
     if staged:
@@ -91,16 +98,91 @@ def _apply(repo: Path, change: dict, branch: str) -> bool:
             ["commit", "-q", "--author", _AUTHOR, "-F", "-"],
             repo=repo, input=message.strip() and message or "replay\n",
         ).returncode == 0
-    if committed:
-        return True
+    if committed and method:
+        return method
     _hard_clean(repo)
     _git(repo, "checkout", "-qf", "main", check=False)
     _git(repo, "branch", "-D", branch, check=False)
-    return False
+    return None
+
+
+_METHODS = {"cherry-pick", "apply-3way", "pr-head"}
+
+
+def _owner_repo(case: dict) -> bool:
+    text = str(case.get("repo") or "").strip().removesuffix(".git")
+    sep = "/" if "/" in text else "__" if "__" in text else ""
+    owner, _, name = text.partition(sep) if sep else ("", "", "")
+    return bool(owner and name)
+
+
+def _pr_num(change: dict) -> int | None:
+    pr = change.get("pr") if isinstance(change, dict) else None
+    return pr if type(pr) is int and pr > 0 else None
+
+
+def _commit_sha(repo: Path, rev: str) -> str | None:
+    proc = _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}", check=False)
+    sha = proc.stdout.strip()
+    return sha if proc.returncode == 0 and sha else None
+
+
+def fetch_pr_head(src_repo: Path, pr: int, *, timeout: int = 120) -> str | None:
+    """Read-only fetch of ``refs/pull/<pr>/head`` into ``refs/bench/pr/<pr>``; skip if present."""
+    ref = f"refs/bench/pr/{int(pr)}"
+    found = _commit_sha(src_repo, ref)
+    if found:
+        return found
+    try:
+        proc = _run(
+            ["fetch", "--no-tags", "origin", f"refs/pull/{int(pr)}/head:{ref}"],
+            repo=src_repo, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return _commit_sha(src_repo, ref) if proc.returncode == 0 else None
+
+
+def _at_pr_head(replay: Path, src: Path, branch: str, sha: str, pr: int) -> bool:
+    if _commit_sha(replay, sha) is None:
+        ref = f"refs/bench/pr/{pr}"
+        try:
+            fetched = _run(["fetch", "--no-tags", str(src), f"{ref}:{ref}"], repo=replay, timeout=120)
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        if fetched.returncode != 0 or _commit_sha(replay, sha) is None:
+            return False
+    base = _git(replay, "merge-base", "main", sha, check=False)
+    if base.returncode != 0 or not base.stdout.strip():
+        return False
+    return _git(replay, "branch", "-f", branch, sha, check=False).returncode == 0
+
+
+def _place(replay: Path, src: Path, case: dict, change: dict, branch: str, fetch) -> str | None:
+    method = _apply(replay, change, branch)
+    pr = None if method else _pr_num(change)
+    if method or pr is None or not _owner_repo(case):
+        return method
+    try:
+        sha = str(fetch(src, pr) or "").strip()
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return "pr-head" if sha and _at_pr_head(replay, src, branch, sha, pr) else None
+
+
+def _recall(repo: Path) -> tuple[str | None, str | None]:
+    try:
+        data = json.loads((repo / ".git" / "bench-methods.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    a, b = data.get("a_method"), data.get("b_method")
+    return (a if a in _METHODS else None, b if b in _METHODS else None)
 
 
 def _meta(repo: Path) -> dict:
     a, b = _branch(repo, "a"), _branch(repo, "b")
+    a_method, b_method = _recall(repo)
     conflict = False
     if a and b:
         proc = _git(repo, "merge-tree", "--write-tree", "a", "b", check=False)
@@ -108,20 +190,30 @@ def _meta(repo: Path) -> dict:
     return {
         "path": str(repo), "main": _branch(repo, "main"), "a": a, "b": b,
         "a_apply_failed": a is None, "b_apply_failed": b is None, "textual_conflict": conflict,
+        "a_method": a_method if a else None, "b_method": b_method if b else None,
     }
 
 
-def build_replay(src_repo: Path, case: dict, root: Path) -> dict:
+def build_replay(
+    src_repo: Path,
+    case: dict,
+    root: Path,
+    *,
+    rebuild_if_b_missing: bool = True,
+    fetch_pr: Callable[[Path, int], str | None] | None = None,
+) -> dict:
     """Create ``root/<case_id>`` (no remote). Reuse it when ``main`` already exists.
 
     The replay depends on the src clone via ``.git/objects/info/alternates``.
+    ``rebuild_if_b_missing`` rebuilds when ``b`` is absent. ``fetch_pr`` overrides ``fetch_pr_head``.
     """
     case_id = str(case["case_id"])
     if not case_id or case_id in {".", ".."} or "/" in case_id or "\\" in case_id:
         raise ValueError(f"unsafe case_id: {case_id!r}")
     dest = Path(root) / case_id
     if (dest / ".git").is_dir() and _branch(dest, "main"):
-        return _meta(dest)
+        if not (rebuild_if_b_missing and _branch(dest, "b") is None):
+            return _meta(dest)
     if dest.exists():
         shutil.rmtree(dest)
     Path(root).mkdir(parents=True, exist_ok=True)
@@ -136,8 +228,13 @@ def build_replay(src_repo: Path, case: dict, root: Path) -> dict:
     for name in _git(dest, "for-each-ref", "--format=%(refname:short)", "refs/heads").stdout.split():
         if name != "main":
             _git(dest, "branch", "-D", name, check=False)
-    _apply(dest, case["a"], "a")
-    _apply(dest, case["b"], "b")
+    fetch = fetch_pr_head if fetch_pr is None else fetch_pr
+    src = Path(src_repo)
+    a_method = _place(dest, src, case, case["a"], "a", fetch)
+    b_method = _place(dest, src, case, case["b"], "b", fetch)
+    (dest / ".git" / "bench-methods.json").write_text(
+        json.dumps({"a_method": a_method, "b_method": b_method}), encoding="utf-8",
+    )
     _git(dest, "checkout", "-q", "main", check=False)
     return _meta(dest)
 

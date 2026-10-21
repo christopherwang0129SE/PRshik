@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from scripts.bench.replay import build_replay, main, parse_declared_deps
+from scripts.bench.replay import _at_pr_head, build_replay, fetch_pr_head, main, parse_declared_deps
 
 _AUTHOR = "MergeGuard Bench <bench@mergeguard.local>"
 
@@ -122,6 +122,7 @@ def test_squash_and_direct_replay_contents_remote_and_reuse(tmp_path: Path, caps
 
     assert meta["main"] == base
     assert meta["a_apply_failed"] is False and meta["b_apply_failed"] is False
+    assert meta["a_method"] == "cherry-pick" and meta["b_method"] == "cherry-pick"
     assert meta["textual_conflict"] is False
     assert _show(replay, "main", "app.py") == "base\n"
     assert _show(replay, "a", "app.py") == "from-a\n"
@@ -168,6 +169,7 @@ def test_merge_commit_replay(tmp_path: Path) -> None:
     replay = Path(meta["path"])
 
     assert meta["a_apply_failed"] is False and meta["b_apply_failed"] is False
+    assert meta["a_method"] == "apply-3way" and meta["b_method"] == "cherry-pick"
     assert meta["textual_conflict"] is False
     assert _show(replay, "a", "a.py") == "feat\n"
     assert _show(replay, "a", "extra.py") == "e\n"
@@ -194,13 +196,22 @@ def test_conflicting_b_omits_branch(tmp_path: Path) -> None:
     assert meta["a_apply_failed"] is False
     assert meta["b_apply_failed"] is True
     assert meta["b"] is None
+    assert meta["a_method"] == "cherry-pick" and meta["b_method"] is None
     assert meta["textual_conflict"] is False
     assert _show(replay, "a", "shared.py") == "AAA\n"
     assert _heads(replay) == {"main", "a"}
     _assert_no_remote(replay)
 
-    again = build_replay(src, case, root)
+    marker = replay / "KEEP"
+    marker.write_text("x")
+    again = build_replay(src, case, root, rebuild_if_b_missing=False)
     assert again["b_apply_failed"] is True and again["a"] == meta["a"]
+    assert marker.read_text() == "x"
+    assert _heads(replay) == {"main", "a"}
+
+    rebuilt = build_replay(src, case, root)
+    assert rebuilt["b_apply_failed"] is True and rebuilt["b_method"] is None
+    assert not marker.exists()
     assert _heads(replay) == {"main", "a"}
 
 
@@ -216,6 +227,7 @@ def test_textual_conflict_when_both_apply(tmp_path: Path) -> None:
     replay = Path(meta["path"])
 
     assert meta["a_apply_failed"] is False and meta["b_apply_failed"] is False
+    assert meta["a_method"] == "cherry-pick" and meta["b_method"] == "cherry-pick"
     assert meta["textual_conflict"] is True
     assert _show(replay, "a", "f.py") == "A\n"
     assert _show(replay, "b", "f.py") == "B\n"
@@ -274,3 +286,118 @@ requires = ["setuptools"]
     assert parse_declared_deps(
         {"pyproject.toml": "this is not [", "requirements.txt": "click\n"}
     ) == ["click"]
+
+
+def _origin(tmp: Path) -> Path:
+    origin = tmp / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-q", "-b", "main")
+    _git(origin, "config", "user.email", "t@example.com")
+    _git(origin, "config", "user.name", "Test")
+    return origin
+
+
+def test_squash_conflict_uses_pr_head_from_local_origin(tmp_path: Path) -> None:
+    origin = _origin(tmp_path)
+    base = _commit(origin, "base", {"shared.py": "line1\nline2\n"})
+    _git(origin, "checkout", "-q", "-B", "pr", base)
+    pr_sha = _commit(origin, "pr work", {"shared.py": "BBB\nline2\n"})
+    _git(origin, "update-ref", "refs/pull/7/head", pr_sha)
+    _git(origin, "checkout", "-q", "main")
+    _git(origin, "branch", "-D", "pr")
+    a_sha = _commit(origin, "change A", {"shared.py": "AAA\nline2\n"})
+    b_sha = _commit(origin, "change B (#7)", {"shared.py": "BBB\nline2\n"})
+    src = tmp_path / "src"
+    subprocess.run(["git", "clone", "--quiet", str(origin), str(src)], check=True)
+    _git(src, "remote", "set-url", "--push", "origin", "DISABLED")
+    fetch_url = _git(src, "remote", "get-url", "origin").strip()
+    case = _case("demo-pr-head", base, a_sha, "squash", b_sha, "squash", b_parent=a_sha)
+    case["repo"] = "acme__widget"
+    case["b"]["pr"] = 7
+
+    meta = build_replay(src, case, tmp_path / "replay")
+    replay = Path(meta["path"])
+
+    assert meta["b_apply_failed"] is False and meta["b_method"] == "pr-head"
+    assert meta["a_method"] == "cherry-pick" and meta["a_apply_failed"] is False
+    assert meta["b"] == pr_sha
+    assert _show(replay, "b", "shared.py") == "BBB\nline2\n"
+    assert _show(replay, "a", "shared.py") == "AAA\nline2\n"
+    assert _show(replay, "main", "shared.py") == "line1\nline2\n"
+    assert _heads(replay) == {"main", "a", "b"}
+    _assert_no_remote(replay)
+    assert _git(src, "rev-parse", "refs/bench/pr/7").strip() == pr_sha
+    assert _git(src, "remote", "get-url", "origin").strip() == fetch_url
+    assert _git(src, "config", "--get", "remote.origin.pushurl").strip() == "DISABLED"
+
+    _git(src, "remote", "set-url", "origin", str(tmp_path / "missing-origin"))
+    assert fetch_pr_head(src, 7) == pr_sha
+    assert build_replay(src, case, tmp_path / "replay") == meta
+
+
+def test_pr_head_rejected_without_shared_history(tmp_path: Path) -> None:
+    origin = _origin(tmp_path)
+    base = _commit(origin, "base", {"shared.py": "line1\n"})
+    a_sha = _commit(origin, "change A", {"shared.py": "AAA\n"})
+    b_sha = _commit(origin, "change B", {"shared.py": "BBB\n"})
+    _git(origin, "checkout", "-q", "--orphan", "side")
+    orphan = _commit(origin, "unrelated", {"shared.py": "ZZZ\n"})
+    _git(origin, "update-ref", "refs/pull/8/head", orphan)
+    _git(origin, "checkout", "-q", "main")
+    _git(origin, "branch", "-D", "side")
+    src = tmp_path / "src"
+    subprocess.run(["git", "clone", "--quiet", str(origin), str(src)], check=True)
+    case = _case("demo-unrelated", base, a_sha, "direct", b_sha, "direct", b_parent=a_sha)
+    case["repo"] = "acme/widget"
+    case["b"]["pr"] = 8
+
+    meta = build_replay(src, case, tmp_path / "replay")
+    replay = Path(meta["path"])
+
+    assert meta["b_apply_failed"] is True and meta["b"] is None and meta["b_method"] is None
+    assert meta["a_method"] == "cherry-pick"
+    assert _git(src, "rev-parse", "refs/bench/pr/8").strip() == orphan
+    assert _heads(replay) == {"main", "a"}
+    _assert_no_remote(replay)
+
+
+def test_pr_fetch_failure_and_missing_owner_omit_b(tmp_path: Path, monkeypatch) -> None:
+    src = _init(tmp_path)
+    base = _commit(src, "base", {"shared.py": "line1\n"})
+    a_sha = _commit(src, "A", {"shared.py": "AAA\n"})
+    b_sha = _commit(src, "B", {"shared.py": "BBB\n"})
+    case = _case("demo-fetch-fail", base, a_sha, "direct", b_sha, "direct", b_parent=a_sha)
+    case["repo"] = "acme__widget"
+    case["b"]["pr"] = 7
+    meta = build_replay(src, case, tmp_path / "replay", fetch_pr=lambda _repo, _pr: None)
+    assert meta["b_apply_failed"] is True and meta["b_method"] is None
+    assert meta["a_method"] == "cherry-pick"
+
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "scripts.bench.replay.fetch_pr_head",
+        lambda *args, **kwargs: calls.append(args),
+    )
+    case["case_id"] = "demo-no-owner"
+    case["repo"] = "src"
+    missed = build_replay(src, case, tmp_path / "replay2")
+    assert calls == []
+    assert missed["b_apply_failed"] is True and missed["b_method"] is None
+
+
+def test_pr_head_fetched_into_replay_when_object_is_absent(tmp_path: Path) -> None:
+    src = _init(tmp_path)
+    base = _commit(src, "base", {"f.py": "base\n"})
+    replay = tmp_path / "replay"
+    subprocess.run(["git", "clone", "--quiet", str(src), str(replay)], check=True)
+    pr_sha = _commit(src, "pr", {"f.py": "from-pr\n"})
+    _git(src, "update-ref", "refs/bench/pr/3", pr_sha)
+    _git(src, "checkout", "-q", "-B", "main", base)
+    missing = subprocess.run(
+        ["git", "-C", str(replay), "cat-file", "-e", f"{pr_sha}^{{commit}}"],
+        capture_output=True,
+    )
+    assert missing.returncode != 0
+    assert _at_pr_head(replay, src, "b", pr_sha, 3) is True
+    assert _git(replay, "rev-parse", "b").strip() == pr_sha
+    assert _show(replay, "b", "f.py") == "from-pr\n"
