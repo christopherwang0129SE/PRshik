@@ -8,7 +8,9 @@
 
 One child per case (``python -m scripts.bench.run --child PATH``). The Token
 Factory key comes only from ``TOKEN_FACTORY_API_KEY_BENCH`` (last whitespace
-token). Spend is ``<results>/../spend.json``.
+token). Spend is ``<results>/../spend.json``. The child's ``WORKSPACE_DIR`` is
+``<replay_dir>/.mg-workspace`` (symlinks to the parent workspace except
+``js-deps``, removed with the case venv unless ``--keep-venv``).
 """
 
 from __future__ import annotations
@@ -35,6 +37,10 @@ _MIN_RESERVE = 0.05
 _GB = 1024 ** 3  # same units as df -h
 _MIN_FREE_GB = 5.0
 _VERIFY_ENV = "MG_BENCH_VERIFY"
+_WORKSPACE_ENV = "WORKSPACE_DIR"  # app.config.Settings.workspace_dir
+_CASE_WORKSPACE = ".mg-workspace"
+_SKIP_WORKSPACE_LINK = "js-deps"
+_ENOSPC_TEXT = "No space left on device"
 _FALSE = {"0", "false", "no", "off"}
 _VERDICT_KEYS = (
     "level", "score", "score_source", "fallback_reason", "model_score",
@@ -262,10 +268,14 @@ def _record(case: dict, meta: dict | None, venv_ok, status: str, seconds: float,
     return record
 
 
+def _record_line(record: Mapping, secrets: list[str]) -> str:
+    return json.dumps(_scrub_obj(record, secrets), ensure_ascii=False)
+
+
 def _save(results: Path, spend_path: Path, spend: dict, record: dict, secrets: list[str]) -> dict:
     results.parent.mkdir(parents=True, exist_ok=True)
     with results.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(_scrub_obj(record, secrets), ensure_ascii=False) + "\n")
+        handle.write(_record_line(record, secrets) + "\n")
     spend = {
         "spent_usd": round(float(spend["spent_usd"]) + max(0.0, float(record.get("cost") or 0)), 6),
         "cases": int(spend["cases"]) + 1,
@@ -285,11 +295,15 @@ def _cost(outcome: dict) -> float:
 
 
 def _enospc(exc: BaseException) -> bool:
-    if not isinstance(exc, OSError):
-        return False
-    if exc.errno == errno.ENOSPC:
+    """ENOSPC errno, or the phrase anywhere in ``str(exc)`` (git raises RuntimeError)."""
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
         return True
-    return "No space left on device" in str(exc)
+    return _ENOSPC_TEXT in str(exc)
+
+
+def _record_enospc(record: Mapping, secrets: list[str]) -> bool:
+    """True when the line about to be appended contains an out-of-space marker."""
+    return _ENOSPC_TEXT in _record_line(record, secrets)
 
 
 def _disk_probe(path: Path) -> Path:
@@ -310,25 +324,78 @@ def _case_replay_dir(replay_root: Path, case: Mapping) -> Path | None:
     return Path(replay_root) / case_id
 
 
-def _drop_venv(replay_root: Path, replay_dir: Path | None) -> None:
-    """Remove ``<replay_dir>/.venv`` only when that directory is inside ``replay_root``."""
+def _inside_replay_root(replay_root: Path, replay_dir: Path | None) -> Path | None:
+    """Resolved case directory when it is a direct child of ``replay_root``."""
     if replay_dir is None:
-        return
+        return None
     root = Path(replay_root).resolve()
     try:
         directory = Path(replay_dir).resolve()
         directory.relative_to(root)
     except (OSError, ValueError):
-        return
+        return None
     # Direct child only: ``resolve`` already dropped ``..`` and symlinks that leave the root.
     if directory == root or directory.parent != root:
+        return None
+    return directory
+
+
+def _drop_inside(replay_root: Path, replay_dir: Path | None, name: str) -> None:
+    directory = _inside_replay_root(replay_root, replay_dir)
+    if directory is None:
         return
-    shutil.rmtree(directory / ".venv", ignore_errors=True)
+    # ``rmtree`` unlinks symlinks; it does not delete their targets.
+    shutil.rmtree(directory / name, ignore_errors=True)
+
+
+def _drop_venv(replay_root: Path, replay_dir: Path | None) -> None:
+    """Remove ``<replay_dir>/.venv`` only when that directory is inside ``replay_root``."""
+    _drop_inside(replay_root, replay_dir, ".venv")
+
+
+def _parent_workspace() -> Path:
+    from app.config import settings
+
+    return Path(settings.workspace_dir).resolve()
+
+
+def _prepare_case_workspace(replay_root: Path, replay_dir: Path | None) -> Path | None:
+    """``<replay_dir>/.mg-workspace`` with parent-workspace symlinks except ``js-deps``.
+
+    Analysis caches (``nemotron-cache``, ``verify-cache``, ``verify``, …) keep
+    working. ``js-deps`` is created by the child inside this directory.
+    """
+    directory = _inside_replay_root(replay_root, replay_dir)
+    if directory is None:
+        return None
+    workspace = directory / _CASE_WORKSPACE
+    workspace.mkdir(parents=True, exist_ok=True)
+    parent = _parent_workspace()
+    if parent.is_dir():
+        for entry in parent.iterdir():
+            if entry.name == _SKIP_WORKSPACE_LINK:
+                continue
+            link = workspace / entry.name
+            if link.is_symlink() or link.exists():
+                continue
+            link.symlink_to(entry, target_is_directory=entry.is_dir())
+    return workspace
+
+
+def _drop_case_workspace(replay_root: Path, replay_dir: Path | None) -> None:
+    """Remove ``<replay_dir>/.mg-workspace`` only when that directory is inside ``replay_root``."""
+    _drop_inside(replay_root, replay_dir, _CASE_WORKSPACE)
 
 
 def _disk_stop(message: str) -> int:
     print(message, file=sys.stderr)
     return 3
+
+
+def _stop_enospc(case_id: str) -> int:
+    return _disk_stop(
+        f"disk stop no space left on device case={case_id or '?'}; result not recorded",
+    )
 
 
 def run_bench(
@@ -364,9 +431,7 @@ def run_bench(
                 meta = build_replay(_src_repo(case, src_root), case, replay_root)
             except Exception as exc:
                 if _enospc(exc):
-                    return _disk_stop(
-                        f"disk stop no space left on device case={case_id or '?'}; result not recorded",
-                    )
+                    return _stop_enospc(case_id)
                 failed = _tail(f"{exc.__class__.__name__}: {exc}", secrets)
             else:
                 reported = meta.get("path") if isinstance(meta, dict) else None
@@ -376,6 +441,8 @@ def run_bench(
                 record = _record(case, meta, None, "replay_failed", time.monotonic() - t0, 0.0)
                 if failed:
                     record["error"] = failed
+                if _record_enospc(record, secrets):
+                    return _stop_enospc(case_id)
                 spend = _save(results, spend_path, spend, record, secrets)
                 done.add(case_id)
                 print(f"{case_id} replay_failed", file=sys.stderr)
@@ -383,13 +450,25 @@ def run_bench(
             if use_venv:
                 try:
                     venv_ok = bool(make_venv(Path(meta["path"])).get("ok"))
-                except Exception:
+                except Exception as exc:
+                    if _enospc(exc):
+                        return _stop_enospc(case_id)
                     venv_ok = False
+            try:
+                workspace = _prepare_case_workspace(replay_root, replay_dir)
+            except Exception as exc:
+                if _enospc(exc):
+                    return _stop_enospc(case_id)
+                raise
             child_env_map = child_env(env_src, replay_root, dry_run=dry_run)
             child_env_map[_VERIFY_ENV] = "1" if verify else "0"
+            if workspace is not None:
+                child_env_map[_WORKSPACE_ENV] = str(workspace)
             try:
                 outcome = run_child(Path(meta["path"]).resolve(), cwd=_BACKEND, env=child_env_map, timeout=timeout)
             except Exception as exc:
+                if _enospc(exc):
+                    return _stop_enospc(case_id)
                 outcome = {"status": "error", "seconds": round(time.monotonic() - t0, 3), "stderr": str(exc)}
             status, cost = str(outcome.get("status") or "error"), _cost(outcome)
             record = _record(case, meta, venv_ok, status, float(outcome.get("seconds") or 0), cost)
@@ -399,12 +478,15 @@ def run_bench(
                 record["flagged"], record["confirmed"] = is_flagged(verdict), is_confirmed(verdict)
             elif status == "error":
                 record["error"] = _tail(str(outcome.get("stderr") or ""), secrets)
+            if _record_enospc(record, secrets):
+                return _stop_enospc(case_id)
             spend = _save(results, spend_path, spend, record, secrets)
             done.add(case_id)
             print(f"{case_id} {status} {cost:.4f}", file=sys.stderr)
         finally:
             if not keep_venv:
                 _drop_venv(replay_root, replay_dir)
+                _drop_case_workspace(replay_root, replay_dir)
     return 0
 
 
