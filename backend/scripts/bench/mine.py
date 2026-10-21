@@ -2,18 +2,21 @@
 """Mine broke/clean pairs from first-parent history.
 
     python backend/scripts/bench/mine.py --repo PATH --branch main \\
-        --max-commits 1500 --out cases.jsonl --neg-ratio 1
+        --owner-name owner/name --max-commits 1500 --out cases.jsonl --neg-ratio 1
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import subprocess
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 _LOG_FMT = "%H%x1f%P%x1f%ct%x1f%s%x1f%b%x1e"
@@ -41,7 +44,27 @@ _MERGE_FIX_RE = re.compile(
     r"|broke(?:n)? by #\d+",
     re.IGNORECASE | re.DOTALL,
 )
-_CONF_RANK = {"revert": 3, "explicit-merge-fix": 2, "weak": 1, "none": 0}
+_CONF_RANK = {"revert": 4, "explicit-merge-fix": 3, "medium": 2, "weak": 1, "none": 0}
+_CODE_SUFFIXES = (".py", ".pyi", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx")
+_SKIP_DIRS = frozenset({"docs", "doc", ".github", "examples"})
+# Changelog names only. ``prepare_release.py`` is code and must still count.
+_NOTES_STEMS = frozenset(
+    {
+        "changelog",
+        "change-log",
+        "change_log",
+        "changes",
+        "history",
+        "news",
+        "releases",
+        "release-notes",
+        "release_notes",
+        "releasenotes",
+        "release-note",
+        "release_note",
+    }
+)
+PrInfo = Callable[[str, str, int], dict | None]
 
 
 @dataclass
@@ -54,6 +77,7 @@ class Change:
     subject: str
     files: set[str]
     body: str = ""
+    second_parent: str = ""
 
 
 @dataclass
@@ -76,6 +100,7 @@ class Case:
     fix_sha: str | None
     fix_subject: str | None
     pair_link: str
+    parallel_evidence: str
 
 
 def _git_proc(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -95,6 +120,124 @@ def _git(repo: Path, *args: str) -> str:
         detail = proc.stderr.strip() or f"git {args[0]} failed"
         raise RuntimeError(detail)
     return proc.stdout
+
+
+def is_code_file(path: str) -> bool:
+    """True for source files that count toward A/B/F overlap."""
+    parts = [part for part in path.replace("\\", "/").split("/") if part not in {"", "."}]
+    if not parts:
+        return False
+    if any(part in _SKIP_DIRS for part in parts[:-1]):
+        return False
+    name = parts[-1].lower()
+    if not name.endswith(_CODE_SUFFIXES):
+        return False
+    stem = name.rsplit(".", 1)[0]
+    return stem not in _NOTES_STEMS
+
+
+def code_files(paths: set[str]) -> set[str]:
+    return {path for path in paths if is_code_file(path)}
+
+
+def _unix_time(value: object) -> int | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _gh_env() -> dict[str, str]:
+    """``gh`` colorizes JSON when ``CLICOLOR_FORCE`` is set, even on a pipe."""
+    env = os.environ.copy()
+    env.pop("CLICOLOR_FORCE", None)
+    env.pop("FORCE_COLOR", None)
+    env["CLICOLOR"] = "0"
+    env["NO_COLOR"] = "1"
+    return env
+
+
+def _parse_pr_payload(text: str) -> dict | None:
+    plain = _ANSI_RE.sub("", text).strip()
+    if not plain:
+        return None
+    try:
+        payload = json.loads(plain)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    created = payload.get("created_at")
+    if not isinstance(created, str) or not created:
+        return None
+    merged = payload.get("merged_at")
+    if not isinstance(merged, str):
+        merged = None
+    return {"created_at": created, "merged_at": merged}
+
+
+def github_pr_info(owner: str, name: str, pr: int) -> dict | None:
+    """Read-only GET of one pull request. None when the lookup fails."""
+    proc = subprocess.run(
+        [
+            "gh",
+            "api",
+            "--method",
+            "GET",
+            f"repos/{owner}/{name}/pulls/{pr}",
+            "--jq",
+            "{created_at: .created_at, merged_at: .merged_at}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_gh_env(),
+    )
+    if proc.returncode != 0:
+        return None
+    return _parse_pr_payload(proc.stdout)
+
+
+def pr_cache_path(out: Path) -> Path:
+    return out.with_name(out.name + ".pr-cache.json")
+
+
+def cached_pr_info(cache_path: Path, fetch: PrInfo = github_pr_info) -> PrInfo:
+    """Disk-backed ``pr_info`` that calls ``fetch`` at most once per PR."""
+    cache: dict[str, dict | None] = {}
+    if cache_path.is_file():
+        try:
+            loaded = json.loads(cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            cache = loaded
+
+    def pr_info(owner: str, name: str, pr: int) -> dict | None:
+        key = f"{owner}/{name}#{int(pr)}"
+        if key in cache:
+            value = cache[key]
+            return value if isinstance(value, dict) else None
+        value = fetch(owner, name, int(pr))
+        cache[key] = value
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
+        return value
+
+    return pr_info
 
 
 def _pr_in_subject(subject: str) -> int | None:
@@ -139,10 +282,19 @@ def integrated_changes(repo: Path, branch: str, max_commits: int) -> list[Change
         sha, parents_raw, committed, subject, *rest = parts
         parents = parents_raw.split()
         parent = parents[0] if parents else ""
+        second_parent = parents[1] if len(parents) > 1 else ""
         kind, pr = _kind(subject, len(parents))
         changes.append(
             Change(
-                sha, parent, kind, pr, int(committed), subject, _files(repo, parent, sha), "\x1f".join(rest)
+                sha,
+                parent,
+                kind,
+                pr,
+                int(committed),
+                subject,
+                _files(repo, parent, sha),
+                "\x1f".join(rest),
+                second_parent,
             )
         )
     changes.reverse()
@@ -267,6 +419,7 @@ def _case(
     fix_sha: str | None,
     fix_subject: str | None,
     pair_link: str,
+    parallel_evidence: str,
 ) -> Case:
     return Case(
         case_id=f"{repo_name}-{earlier.sha[:8]}-{later.sha[:8]}",
@@ -279,14 +432,19 @@ def _case(
         fix_sha=fix_sha,
         fix_subject=fix_subject,
         pair_link=pair_link,
+        parallel_evidence=parallel_evidence,
     )
 
 
-def _confidence(fix: FixEvent, how: str) -> str:
+def _confidence(fix: FixEvent, how: str, earlier: Change, later: Change) -> str:
     if fix.kind == "revert" and how in {"sha", "mapped", "pr"}:
         return "revert"
     if fix.kind == "merge-fix" and how == "pr":
         return "explicit-merge-fix"
+    if fix.kind == "followup-fix":
+        named = {pr for pr in (earlier.pr, later.pr) if pr is not None}
+        if named.intersection(fix.prs):
+            return "medium"
     return "weak"
 
 
@@ -301,6 +459,9 @@ def mine_cases(
     neg_ratio: float = 1.0,
     seed: int = 0,
     drops: Counter[str] | None = None,
+    pr_info: PrInfo | None = None,
+    owner: str | None = None,
+    name: str | None = None,
 ) -> list[Case]:
     """Positive fix pairs, then ``round(neg_ratio * positives)`` clean pairs."""
     repo_name = Path(repo).resolve().name
@@ -308,6 +469,52 @@ def mine_cases(
     if drops is None:
         drops = Counter()
     ancestor_cache: dict[tuple[str, str], bool] = {}
+    merge_base_cache: dict[tuple[str, str], str | None] = {}
+    pr_cache: dict[tuple[str, str, int], dict | None] = {}
+
+    def lookup_pr(pr: int) -> dict | None:
+        if pr_info is None or not owner or not name:
+            return None
+        key = (owner, name, int(pr))
+        if key not in pr_cache:
+            pr_cache[key] = pr_info(owner, name, int(pr))
+        return pr_cache[key]
+
+    def merge_base(left: str, right: str) -> str | None:
+        key = (left, right)
+        if key not in merge_base_cache:
+            proc = _git_proc(repo, "merge-base", left, right)
+            if proc.returncode != 0:
+                merge_base_cache[key] = None
+            else:
+                merge_base_cache[key] = proc.stdout.strip() or None
+        return merge_base_cache[key]
+
+    def parallel_evidence(earlier: Change, later: Change) -> str | None:
+        """How ``later`` (B) was in progress before ``earlier`` (A) landed.
+
+        Direct commits have no PR and are not eligible. A merge is parallel
+        when ``git merge-base <A> <B's second parent>`` does not contain A.
+        A squash is parallel when B's PR ``created_at`` is before A's time.
+        """
+        if later.kind == "merge":
+            if not later.second_parent:
+                return None
+            base = merge_base(earlier.sha, later.second_parent)
+            if base is None:
+                return "merge-topology"
+            if _sha_match(base, earlier.sha) or _is_ancestor(repo, earlier.sha, base, ancestor_cache):
+                return None
+            return "merge-topology"
+        if later.kind == "squash" and later.pr is not None:
+            info = lookup_pr(later.pr)
+            if not info:
+                return None
+            created = _unix_time(info.get("created_at"))
+            if created is not None and created < earlier.time:
+                return "pr-created-before-A"
+            return None
+        return None
 
     def before(later: Change, days: int, gap: int) -> list[Change]:
         end = index[later.sha]
@@ -358,9 +565,9 @@ def mine_cases(
             for change in reversed(prior):
                 if change.pr is not None and change.pr in fix.prs:
                     return change, "pr"
-        touched = fix.change.files
+        touched = code_files(fix.change.files)
         for change in reversed(prior):
-            if change.files & touched:
+            if code_files(change.files) & touched:
                 return change, "files"
         return None, ""
 
@@ -370,20 +577,27 @@ def mine_cases(
         best: Change | None = None
         best_key: tuple[int, int, int, int, int] | None = None
         best_link: str | None = None
+        fix_code = code_files(fix_change.files)
+        broken_code = code_files(broken.files)
         for change in before(broken, pair_days, pair_gap):
-            shared = change.files & broken.files
-            both = bool(fix_change.files & change.files) and bool(fix_change.files & broken.files)
+            change_code = code_files(change.files)
+            if not change_code:
+                continue
+            shared = change_code & broken_code
+            both = bool(fix_code & change_code) and bool(fix_code & broken_code)
             if shared and (both or not require_both):
                 link = "shared-file"
             elif both:
                 link = "fix-touches-both"
             else:
                 continue
+            if fix_change.sha in {change.sha, broken.sha}:
+                continue
             key = (
                 1 if link == "shared-file" else 0,
-                len(shared & fix_change.files),
+                len(shared & fix_code),
                 len(shared),
-                len(change.files & fix_change.files),
+                len(change_code & fix_code),
                 index[change.sha],
             )
             if best_key is None or key > best_key:
@@ -393,18 +607,35 @@ def mine_cases(
     slots: dict[tuple[str, str], Case] = {}
     order: list[tuple[str, str]] = []
     for fix in fixes:
+        if not code_files(fix.change.files):
+            drops["no code files"] += 1
+            continue
         broken, how = pick_broken(fix)
         if broken is None:
             drops["no B found"] += 1
             continue
-        if not before(broken, pair_days, pair_gap):
+        if not code_files(broken.files):
+            drops["no code files"] += 1
+            continue
+        if fix.change.sha == broken.sha:
+            drops["no B found"] += 1
+            continue
+        window = before(broken, pair_days, pair_gap)
+        if not window:
             drops["no A in window"] += 1
             continue
         partner, link = pick_partner(
             broken, fix.change, require_both=fix.kind == "followup-fix"
         )
         if partner is None or link is None:
-            drops["no shared link"] += 1
+            if not any(code_files(change.files) for change in window):
+                drops["no code files"] += 1
+            else:
+                drops["no shared link"] += 1
+            continue
+        evidence = parallel_evidence(partner, broken)
+        if evidence is None:
+            drops["not parallel"] += 1
             continue
         key = (partner.sha, broken.sha)
         case = _case(
@@ -413,10 +644,11 @@ def mine_cases(
             broken,
             "broke",
             fix.kind,
-            _confidence(fix, how),
+            _confidence(fix, how, partner, broken),
             fix.change.sha,
             fix.change.subject,
             link,
+            evidence,
         )
         if key in slots:
             if _CONF_RANK[case.confidence] > _CONF_RANK[slots[key].confidence]:
@@ -427,41 +659,55 @@ def mine_cases(
     positives = [slots[key] for key in order]
 
     def later_fix_touches(earlier: Change, later: Change) -> bool:
-        watched = earlier.files | later.files
+        """True when a fix within ``max_days`` touches code from A or B."""
+        watched = code_files(earlier.files) | code_files(later.files)
+        if not watched:
+            return False
         later_index = index[later.sha]
+        limit = max_days * _DAY
         for fix in fixes:
             fix_change = fix.change
-            fix_index = index[fix_change.sha]
-            if fix_index <= later_index:
+            fix_index = index.get(fix_change.sha)
+            if fix_index is None or fix_index <= later_index:
                 continue
-            if fix.kind == "followup-fix":
-                if fix_index - later_index > _FOLLOWUP_GAP:
-                    continue
-                limit = _FOLLOWUP_DAYS * _DAY
-            else:
-                limit = max_days * _DAY
             delta = fix_change.time - later.time
             if delta < 0 or delta > limit:
                 continue
-            if fix_change.files & watched:
+            if code_files(fix_change.files) & watched:
                 return True
         return False
 
-    eligible: list[tuple[Change, Change]] = []
+    eligible: list[tuple[Change, Change, str]] = []
     for later in changes:
+        if not code_files(later.files):
+            continue
         for earlier in before(later, pair_days, pair_gap):
-            if not (earlier.files & later.files):
+            if not (code_files(earlier.files) & code_files(later.files)):
                 continue
             if (earlier.sha, later.sha) in slots:
                 continue
+            evidence = parallel_evidence(earlier, later)
+            if evidence is None:
+                continue
             if later_fix_touches(earlier, later):
                 continue
-            eligible.append((earlier, later))
+            eligible.append((earlier, later, evidence))
     random.Random(seed).shuffle(eligible)
     count = max(0, round(neg_ratio * len(positives)))
     negatives = [
-        _case(repo_name, earlier, later, "clean", "none", "none", None, None, "shared-file")
-        for earlier, later in eligible[:count]
+        _case(
+            repo_name,
+            earlier,
+            later,
+            "clean",
+            "none",
+            "none",
+            None,
+            None,
+            "shared-file",
+            evidence,
+        )
+        for earlier, later, evidence in eligible[:count]
     ]
     return positives + negatives
 
@@ -473,13 +719,20 @@ def _print_counts(cases: list[Case], fixes: list[FixEvent], drops: Counter[str])
     print(f"fix events: {len(fixes)}")
     for kind in ("revert", "merge-fix", "followup-fix"):
         print(f"fix {kind}: {kinds.get(kind, 0)}")
-    for reason in ("no B found", "no A in window", "no shared link"):
+    for reason in ("no B found", "no A in window", "no shared link", "not parallel", "no code files"):
         print(f"dropped {reason}: {drops.get(reason, 0)}")
     print(f"cases: {len(cases)}")
     for label in ("broke", "clean"):
         print(f"label {label}: {labels.get(label, 0)}")
-    for confidence in ("revert", "explicit-merge-fix", "weak", "none"):
+    for confidence in ("revert", "explicit-merge-fix", "medium", "weak", "none"):
         print(f"confidence {confidence}: {confidences.get(confidence, 0)}")
+
+
+def _owner_name(value: str) -> tuple[str, str]:
+    owner, sep, name = value.partition("/")
+    if not sep or "/" in name or not owner or not name:
+        raise argparse.ArgumentTypeError("expected owner/name")
+    return owner, name
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -494,11 +747,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pair-days", type=int, default=7)
     parser.add_argument("--pair-gap", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--owner-name",
+        type=_owner_name,
+        default=None,
+        help="GitHub owner/name used for read-only PR created_at lookups",
+    )
     args = parser.parse_args(argv)
 
     changes = integrated_changes(args.repo, args.branch, args.max_commits)
     fixes = find_fix_events(args.repo, changes)
     drops: Counter[str] = Counter()
+    owner = name = None
+    info: PrInfo | None = None
+    if args.owner_name is not None:
+        owner, name = args.owner_name
+        info = cached_pr_info(pr_cache_path(args.out))
     cases = mine_cases(
         args.repo,
         changes,
@@ -510,6 +774,9 @@ def main(argv: list[str] | None = None) -> int:
         neg_ratio=args.neg_ratio,
         seed=args.seed,
         drops=drops,
+        pr_info=info,
+        owner=owner,
+        name=name,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8") as handle:
