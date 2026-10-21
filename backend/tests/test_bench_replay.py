@@ -102,6 +102,12 @@ def _assert_no_remote(repo: Path) -> None:
     assert proc.returncode != 0
 
 
+def _assert_alternates(replay: Path, src: Path) -> None:
+    alternates = replay / ".git" / "objects" / "info" / "alternates"
+    assert alternates.is_file()
+    assert str((src / ".git" / "objects").resolve()) in alternates.read_text(encoding="utf-8")
+
+
 def test_squash_and_direct_replay_contents_remote_and_reuse(tmp_path: Path, capsys) -> None:
     src = _init(tmp_path)
     base = _commit(src, "base", {"app.py": "base\n", "readme.md": "r\n"})
@@ -128,6 +134,7 @@ def test_squash_and_direct_replay_contents_remote_and_reuse(tmp_path: Path, caps
     assert _heads(replay) == {"main", "a", "b"}
     assert _git(replay, "log", "-1", "--format=%an <%ae>", "a").strip() == _AUTHOR
     assert _git(replay, "log", "-1", "--format=%cn <%ce>", "b").strip() == _AUTHOR
+    _assert_alternates(replay, src)
     _assert_no_remote(replay)
 
     marker = replay / "KEEP"

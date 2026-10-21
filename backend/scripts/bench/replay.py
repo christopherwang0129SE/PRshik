@@ -7,6 +7,8 @@
 ``main`` is ``a.parent``. Each change is applied onto ``main``: merge commits
 via ``git diff <parent> <sha> | git apply --3way`` (fallback ``cherry-pick -m 1``),
 squash/direct via ``git cherry-pick``. If B conflicts, branch ``b`` is absent.
+
+Replays depend on the src clone via ``.git/objects/info/alternates``.
 """
 
 from __future__ import annotations
@@ -110,7 +112,10 @@ def _meta(repo: Path) -> dict:
 
 
 def build_replay(src_repo: Path, case: dict, root: Path) -> dict:
-    """Create ``root/<case_id>`` (no remote). Reuse it when ``main`` already exists."""
+    """Create ``root/<case_id>`` (no remote). Reuse it when ``main`` already exists.
+
+    The replay depends on the src clone via ``.git/objects/info/alternates``.
+    """
     case_id = str(case["case_id"])
     if not case_id or case_id in {".", ".."} or "/" in case_id or "\\" in case_id:
         raise ValueError(f"unsafe case_id: {case_id!r}")
@@ -120,7 +125,7 @@ def build_replay(src_repo: Path, case: dict, root: Path) -> dict:
     if dest.exists():
         shutil.rmtree(dest)
     Path(root).mkdir(parents=True, exist_ok=True)
-    clone = _run(["git", "clone", "--quiet", "--no-local", "--no-checkout", str(src_repo), str(dest)])
+    clone = _run(["git", "clone", "--quiet", "--shared", "--no-checkout", str(src_repo), str(dest)])
     if clone.returncode != 0:
         raise RuntimeError((clone.stderr or clone.stdout).strip() or "git clone failed")
     for name in _git(dest, "remote").stdout.split():
