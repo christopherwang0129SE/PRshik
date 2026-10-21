@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -97,6 +100,20 @@ def _patch_replay(monkeypatch: pytest.MonkeyPatch, captured: list | None = None,
     monkeypatch.setattr("scripts.bench.run.build_replay", fake)
 
 
+def _invoke(tmp: Path, extra: list[str] | None = None) -> list[str]:
+    return [
+        "--cases",
+        str(tmp / "cases.jsonl"),
+        "--src-root",
+        str(tmp / "src"),
+        "--replay-root",
+        str(tmp / "replay"),
+        "--results",
+        str(tmp / "results" / "run"),
+        *(extra or []),
+    ]
+
+
 def _run(
     tmp: Path,
     rows: list[dict],
@@ -106,26 +123,41 @@ def _run(
     *,
     b: str | None = "bbbb",
     captured: list | None = None,
+    replay=None,
 ) -> tuple[int, Path]:
     cases = tmp / "cases.jsonl"
     _write(cases, rows)
-    _patch_replay(monkeypatch, captured, b=b)
+    if replay is None:
+        _patch_replay(monkeypatch, captured, b=b)
+    else:
+        monkeypatch.setattr("scripts.bench.run.build_replay", replay)
     monkeypatch.setattr("scripts.bench.run.run_child", child)
     results = tmp / "results" / "run"
-    rc = main(
-        [
-            "--cases",
-            str(cases),
-            "--src-root",
-            str(tmp / "src"),
-            "--replay-root",
-            str(tmp / "replay"),
-            "--results",
-            str(results),
-            *extra,
-        ]
-    )
-    return rc, results
+    return main(_invoke(tmp, extra)), results
+
+
+def _plant(dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "keep.txt").write_text("stay", encoding="utf-8")
+    venv = dest / ".venv"
+    venv.mkdir(exist_ok=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+
+
+def _spy_rmtree(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, bool]]:
+    removed: list[tuple[Path, bool]] = []
+    real = shutil.rmtree
+
+    def spy(path, ignore_errors=False, **kwargs):
+        removed.append((Path(path), bool(ignore_errors)))
+        return real(path, ignore_errors=ignore_errors, **kwargs)
+
+    monkeypatch.setattr("scripts.bench.run.shutil.rmtree", spy)
+    return removed
+
+
+def _ok_child(replay_path: Path, *, cwd: Path, env: dict, timeout: float, argv=None) -> dict:
+    return {"status": "ok", "verdict": _verdict(0.0), "seconds": 0.01}
 
 
 def test_child_env_strips_label_and_disables_when_missing(tmp_path: Path) -> None:
@@ -419,3 +451,270 @@ def test_child_crash_scrubs_stderr(tmp_path: Path) -> None:
     assert outcome["status"] == "error"
     assert token not in outcome["stderr"]
     assert "nope" in outcome["stderr"]
+
+
+def test_drops_replay_venv_after_each_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    replay = tmp_path / "replay"
+    (replay / ".venv").mkdir(parents=True)
+    (replay / ".venv" / "root").write_text("keep", encoding="utf-8")
+    (replay / "other" / ".venv").mkdir(parents=True)
+    (replay / "other" / ".venv" / "secret").write_text("keep", encoding="utf-8")
+    removed = _spy_rmtree(monkeypatch)
+
+    def fake(src: Path, case: dict, root: Path) -> dict:
+        dest = Path(root) / str(case["case_id"])
+        _plant(dest)
+        if case["case_id"] == "exploded":
+            raise RuntimeError("clone failed")
+        return _meta(case, Path(root), b=None if case["case_id"] == "missing" else "bbbb")
+
+    def child(replay_path: Path, *, cwd: Path, env: dict, timeout: float, argv=None) -> dict:
+        name = Path(replay_path).name
+        if name == "timeout":
+            assert not (replay / "ok" / ".venv").exists()
+            return {"status": "timeout", "seconds": 0.2}
+        if name == "error":
+            raise RuntimeError("child blew up")
+        return {"status": "ok", "verdict": _verdict(0.0), "seconds": 0.01}
+
+    rows = [_case("ok"), _case("timeout"), _case("error"), _case("missing"), _case("exploded")]
+    rc, results = _run(tmp_path, rows, monkeypatch, ["--dry-run"], child, replay=fake)
+    assert rc == 0
+    got = [(row["case_id"], row["status"]) for row in _read(results / "results.jsonl")]
+    assert got == [
+        ("ok", "ok"),
+        ("timeout", "timeout"),
+        ("error", "error"),
+        ("missing", "replay_failed"),
+        ("exploded", "replay_failed"),
+    ]
+    assert "child blew up" in _read(results / "results.jsonl")[2]["error"]
+    assert "RuntimeError" in _read(results / "results.jsonl")[4]["error"]
+    for case_id in ("ok", "timeout", "error", "missing", "exploded"):
+        assert (replay / case_id / "keep.txt").read_text(encoding="utf-8") == "stay"
+        assert not (replay / case_id / ".venv").exists()
+    assert (replay / ".venv" / "root").read_text(encoding="utf-8") == "keep"
+    assert (replay / "other" / ".venv" / "secret").read_text(encoding="utf-8") == "keep"
+    root = replay.resolve()
+    assert [path.parent.name for path, _flag in removed] == ["ok", "timeout", "error", "missing", "exploded"]
+    for path, ignore_errors in removed:
+        assert ignore_errors is True
+        assert path.name == ".venv"
+        assert path.resolve().parent.parent == root
+
+
+def test_keep_venv_leaves_dot_venv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    removed = _spy_rmtree(monkeypatch)
+
+    def fake(src: Path, case: dict, root: Path) -> dict:
+        dest = Path(root) / str(case["case_id"])
+        _plant(dest)
+        if case["case_id"] == "missing":
+            return _meta(case, Path(root), b=None)
+        return _meta(case, Path(root))
+
+    rc, _results = _run(
+        tmp_path,
+        [_case("ok"), _case("missing")],
+        monkeypatch,
+        ["--dry-run", "--keep-venv"],
+        _ok_child,
+        replay=fake,
+    )
+    assert rc == 0
+    assert removed == []
+    for case_id in ("ok", "missing"):
+        venv = tmp_path / "replay" / case_id / ".venv" / "pyvenv.cfg"
+        assert venv.read_text(encoding="utf-8").startswith("home")
+
+
+def test_venv_delete_stays_inside_replay_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    replay = tmp_path / "replay"
+    replay.mkdir()
+    (replay / ".venv").mkdir()
+    (replay / ".venv" / "secret").write_text("root", encoding="utf-8")
+    outside = tmp_path / "outside"
+    _plant(outside)
+    escaped = tmp_path / "escaped"
+    _plant(escaped)
+    linked = tmp_path / "linked"
+    _plant(linked)
+    (replay / "linked").symlink_to(linked, target_is_directory=True)
+    removed = _spy_rmtree(monkeypatch)
+
+    def fake(src: Path, case: dict, root: Path) -> dict:
+        cid = str(case["case_id"])
+        meta = _meta(case, Path(root))
+        if cid == "outside":
+            meta["path"] = str(outside)
+        elif cid == "dotdot":
+            meta["path"] = str(Path(root) / ".." / "escaped")
+        elif cid == "rootpath":
+            meta["path"] = str(Path(root))
+        elif cid == "safe":
+            _plant(Path(root) / cid)
+        return meta
+
+    rc, results = _run(
+        tmp_path,
+        [_case("safe"), _case("outside"), _case("dotdot"), _case("linked"), _case("rootpath")],
+        monkeypatch,
+        ["--dry-run"],
+        _ok_child,
+        replay=fake,
+    )
+    assert rc == 0
+    assert [row["case_id"] for row in _read(results / "results.jsonl")] == [
+        "safe", "outside", "dotdot", "linked", "rootpath",
+    ]
+    assert not (replay / "safe" / ".venv").exists()
+    assert (replay / "safe" / "keep.txt").read_text(encoding="utf-8") == "stay"
+    assert (outside / ".venv" / "pyvenv.cfg").is_file()
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "stay"
+    assert (escaped / ".venv" / "pyvenv.cfg").is_file()
+    assert (escaped / "keep.txt").read_text(encoding="utf-8") == "stay"
+    assert (linked / ".venv" / "pyvenv.cfg").is_file()
+    assert (linked / "keep.txt").read_text(encoding="utf-8") == "stay"
+    assert (replay / "linked").is_symlink()
+    assert (replay / ".venv" / "secret").read_text(encoding="utf-8") == "root"
+    assert [path.resolve().parent.name for path, flag in removed] == ["safe"]
+    assert removed[0][1] is True
+
+
+def test_low_disk_writes_nothing_and_resume_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    gib = 1024 ** 3
+    state = {"free": 6 * gib}
+    monkeypatch.setattr(
+        "scripts.bench.run.shutil.disk_usage",
+        lambda _path: SimpleNamespace(total=state["free"] + 1, used=1, free=state["free"]),
+    )
+    built: list[str] = []
+
+    def fake(src: Path, case: dict, root: Path) -> dict:
+        built.append(str(case["case_id"]))
+        return _meta(case, Path(root))
+
+    ran: list[str] = []
+
+    def child(replay_path: Path, *, cwd: Path, env: dict, timeout: float, argv=None) -> dict:
+        ran.append(Path(replay_path).name)
+        return {"status": "ok", "verdict": _verdict(0.0), "seconds": 0.01}
+
+    extra = ["--dry-run", "--min-free-gb", "10"]
+    rc, results = _run(tmp_path, [_case("c1"), _case("c2")], monkeypatch, extra, child, replay=fake)
+    assert rc == 3
+    assert built == []
+    assert ran == []
+    assert not (results / "results.jsonl").exists()
+    assert not (results.parent / "spend.json").exists()
+    err = capsys.readouterr().err
+    assert "disk stop free=6.00GB below min=10GB case=c1; result not recorded" in err
+
+    state["free"] = 6 * gib
+    rc2 = main(_invoke(tmp_path, ["--dry-run"]))
+    assert rc2 == 0
+    assert built == ["c1", "c2"]
+    assert ran == ["c1", "c2"]
+    assert [row["case_id"] for row in _read(results / "results.jsonl")] == ["c1", "c2"]
+
+
+def test_disk_boundary_stops_before_next_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    gib = 1024 ** 3
+    calls = {"n": 0}
+
+    def usage(_path: Path):
+        calls["n"] += 1
+        free = 5 * gib if calls["n"] == 1 else 5 * gib - 1
+        return SimpleNamespace(total=free + 1, used=1, free=free)
+
+    monkeypatch.setattr("scripts.bench.run.shutil.disk_usage", usage)
+    seen: list[str] = []
+
+    def child(replay_path: Path, *, cwd: Path, env: dict, timeout: float, argv=None) -> dict:
+        seen.append(Path(replay_path).name)
+        return {"status": "ok", "verdict": _verdict(0.0), "seconds": 0.01}
+
+    rc, results = _run(tmp_path, [_case("c1"), _case("c2")], monkeypatch, ["--dry-run"], child)
+    assert rc == 3
+    assert calls["n"] == 2
+    assert seen == ["c1"]
+    rows = _read(results / "results.jsonl")
+    assert [row["case_id"] for row in rows] == ["c1"]
+    spend = json.loads((results.parent / "spend.json").read_text(encoding="utf-8"))
+    assert spend["cases"] == 1
+    err = capsys.readouterr().err
+    assert "disk stop" in err
+    assert "case=c2; result not recorded" in err
+    assert "min=5" in err
+
+
+@pytest.mark.parametrize("kind", ["errno", "message"])
+def test_replay_enospc_stops_without_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], kind: str,
+) -> None:
+    phase = {"block": True}
+    seen: list[str] = []
+
+    def fake(src: Path, case: dict, root: Path) -> dict:
+        seen.append(str(case["case_id"]))
+        dest = Path(root) / str(case["case_id"])
+        _plant(dest)
+        if phase["block"] and case["case_id"] == "full":
+            if kind == "errno":
+                raise OSError(errno.ENOSPC, "disk full")
+            raise OSError(errno.EIO, "No space left on device")
+        return _meta(case, Path(root))
+
+    ran: list[str] = []
+
+    def child(replay_path: Path, *, cwd: Path, env: dict, timeout: float, argv=None) -> dict:
+        ran.append(Path(replay_path).name)
+        return {"status": "ok", "verdict": _verdict(0.0), "seconds": 0.01}
+
+    rc, results = _run(
+        tmp_path, [_case("full"), _case("later")], monkeypatch, ["--dry-run"], child, replay=fake,
+    )
+    assert rc == 3
+    assert seen == ["full"]
+    assert ran == []
+    assert not (results / "results.jsonl").exists()
+    assert not (results.parent / "spend.json").exists()
+    assert not (tmp_path / "replay" / "full" / ".venv").exists()
+    assert (tmp_path / "replay" / "full" / "keep.txt").read_text(encoding="utf-8") == "stay"
+    err = capsys.readouterr().err
+    assert "disk stop no space left on device case=full; result not recorded" in err
+
+    phase["block"] = False
+    seen.clear()
+    rc2 = main(_invoke(tmp_path, ["--dry-run"]))
+    assert rc2 == 0
+    assert seen == ["full", "later"]
+    assert ran == ["full", "later"]
+    assert [row["case_id"] for row in _read(results / "results.jsonl")] == ["full", "later"]
+    assert not (tmp_path / "replay" / "full" / ".venv").exists()
+    assert not (tmp_path / "replay" / "later" / ".venv").exists()
+
+
+def test_ordinary_oserror_is_replay_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake(src: Path, case: dict, root: Path) -> dict:
+        if case["case_id"] == "bad":
+            dest = Path(root) / "bad"
+            _plant(dest)
+            raise OSError(errno.EACCES, "permission denied")
+        _plant(Path(root) / str(case["case_id"]))
+        return _meta(case, Path(root))
+
+    rc, results = _run(
+        tmp_path, [_case("bad"), _case("next")], monkeypatch, ["--dry-run"], _ok_child, replay=fake,
+    )
+    assert rc == 0
+    rows = _read(results / "results.jsonl")
+    assert [(row["case_id"], row["status"]) for row in rows] == [("bad", "replay_failed"), ("next", "ok")]
+    assert "permission denied" in rows[0]["error"]
+    assert not (tmp_path / "replay" / "bad" / ".venv").exists()
+    assert not (tmp_path / "replay" / "next" / ".venv").exists()
+    assert (tmp_path / "replay" / "bad" / "keep.txt").is_file()

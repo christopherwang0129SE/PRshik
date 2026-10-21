@@ -3,8 +3,8 @@
 
     python scripts/bench/run.py --cases A.jsonl [--cases B.jsonl ...] \\
         --src-root SRC --replay-root REPLAY --results RESULTS/<run> \\
-        [--venv] [--verify/--no-verify] [--dry-run] [--max-usd 9] \\
-        [--limit N] [--timeout 600]
+        [--venv] [--keep-venv] [--min-free-gb 5] [--verify/--no-verify] \\
+        [--dry-run] [--max-usd 9] [--limit N] [--timeout 600]
 
 One child per case (``python -m scripts.bench.run --child PATH``). The Token
 Factory key comes only from ``TOKEN_FACTORY_API_KEY_BENCH`` (last whitespace
@@ -14,8 +14,10 @@ token). Spend is ``<results>/../spend.json``.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -30,6 +32,8 @@ if str(_BACKEND) not in sys.path:
 from scripts.bench.replay import build_replay, make_venv
 
 _MIN_RESERVE = 0.05
+_GB = 1024 ** 3  # same units as df -h
+_MIN_FREE_GB = 5.0
 _VERIFY_ENV = "MG_BENCH_VERIFY"
 _FALSE = {"0", "false", "no", "off"}
 _VERDICT_KEYS = (
@@ -280,10 +284,58 @@ def _cost(outcome: dict) -> float:
         return 0.0
 
 
+def _enospc(exc: BaseException) -> bool:
+    if not isinstance(exc, OSError):
+        return False
+    if exc.errno == errno.ENOSPC:
+        return True
+    return "No space left on device" in str(exc)
+
+
+def _disk_probe(path: Path) -> Path:
+    probe = Path(path)
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent
+    return probe
+
+
+def _free_bytes(path: Path) -> int:
+    return int(shutil.disk_usage(_disk_probe(path)).free)
+
+
+def _case_replay_dir(replay_root: Path, case: Mapping) -> Path | None:
+    case_id = str(case.get("case_id") or "")
+    if not case_id or case_id in {".", ".."} or "/" in case_id or "\\" in case_id:
+        return None
+    return Path(replay_root) / case_id
+
+
+def _drop_venv(replay_root: Path, replay_dir: Path | None) -> None:
+    """Remove ``<replay_dir>/.venv`` only when that directory is inside ``replay_root``."""
+    if replay_dir is None:
+        return
+    root = Path(replay_root).resolve()
+    try:
+        directory = Path(replay_dir).resolve()
+        directory.relative_to(root)
+    except (OSError, ValueError):
+        return
+    # Direct child only: ``resolve`` already dropped ``..`` and symlinks that leave the root.
+    if directory == root or directory.parent != root:
+        return
+    shutil.rmtree(directory / ".venv", ignore_errors=True)
+
+
+def _disk_stop(message: str) -> int:
+    print(message, file=sys.stderr)
+    return 3
+
+
 def run_bench(
     cases_paths: list[Path], src_root: Path, replay_root: Path, results_dir: Path, *,
     use_venv: bool = False, verify: bool = True, dry_run: bool = False, max_usd: float = 9.0,
     limit: int | None = None, timeout: float = 600.0, base_env: Mapping[str, str] | None = None,
+    keep_venv: bool = False, min_free_gb: float = _MIN_FREE_GB,
 ) -> int:
     env_src = os.environ if base_env is None else base_env
     secrets = _secrets(env_src)
@@ -298,42 +350,61 @@ def run_bench(
         if _over(spend, max_usd):
             print(f"budget stop spent={float(spend['spent_usd']):.4f} max={max_usd:.4f}", file=sys.stderr)
             break
+        free_gb = _free_bytes(replay_root) / _GB
+        if free_gb < min_free_gb:
+            return _disk_stop(
+                f"disk stop free={free_gb:.2f}GB below min={min_free_gb:g}GB "
+                f"case={case_id or '?'}; result not recorded",
+            )
         started_n += 1
         t0, meta, venv_ok, failed = time.monotonic(), None, None, ""
+        replay_dir = _case_replay_dir(replay_root, case)
         try:
-            meta = build_replay(_src_repo(case, src_root), case, replay_root)
-        except Exception as exc:
-            failed = _tail(f"{exc.__class__.__name__}: {exc}", secrets)
-        if failed or not (meta or {}).get("b"):
-            record = _record(case, meta, None, "replay_failed", time.monotonic() - t0, 0.0)
-            if failed:
-                record["error"] = failed
+            try:
+                meta = build_replay(_src_repo(case, src_root), case, replay_root)
+            except Exception as exc:
+                if _enospc(exc):
+                    return _disk_stop(
+                        f"disk stop no space left on device case={case_id or '?'}; result not recorded",
+                    )
+                failed = _tail(f"{exc.__class__.__name__}: {exc}", secrets)
+            else:
+                reported = meta.get("path") if isinstance(meta, dict) else None
+                if reported:
+                    replay_dir = Path(str(reported))
+            if failed or not (meta or {}).get("b"):
+                record = _record(case, meta, None, "replay_failed", time.monotonic() - t0, 0.0)
+                if failed:
+                    record["error"] = failed
+                spend = _save(results, spend_path, spend, record, secrets)
+                done.add(case_id)
+                print(f"{case_id} replay_failed", file=sys.stderr)
+                continue
+            if use_venv:
+                try:
+                    venv_ok = bool(make_venv(Path(meta["path"])).get("ok"))
+                except Exception:
+                    venv_ok = False
+            child_env_map = child_env(env_src, replay_root, dry_run=dry_run)
+            child_env_map[_VERIFY_ENV] = "1" if verify else "0"
+            try:
+                outcome = run_child(Path(meta["path"]).resolve(), cwd=_BACKEND, env=child_env_map, timeout=timeout)
+            except Exception as exc:
+                outcome = {"status": "error", "seconds": round(time.monotonic() - t0, 3), "stderr": str(exc)}
+            status, cost = str(outcome.get("status") or "error"), _cost(outcome)
+            record = _record(case, meta, venv_ok, status, float(outcome.get("seconds") or 0), cost)
+            if status == "ok":
+                verdict = outcome.get("verdict") or {}
+                record.update({key: verdict.get(key) for key in _VERDICT_KEYS})
+                record["flagged"], record["confirmed"] = is_flagged(verdict), is_confirmed(verdict)
+            elif status == "error":
+                record["error"] = _tail(str(outcome.get("stderr") or ""), secrets)
             spend = _save(results, spend_path, spend, record, secrets)
             done.add(case_id)
-            print(f"{case_id} replay_failed", file=sys.stderr)
-            continue
-        if use_venv:
-            try:
-                venv_ok = bool(make_venv(Path(meta["path"])).get("ok"))
-            except Exception:
-                venv_ok = False
-        child_env_map = child_env(env_src, replay_root, dry_run=dry_run)
-        child_env_map[_VERIFY_ENV] = "1" if verify else "0"
-        try:
-            outcome = run_child(Path(meta["path"]).resolve(), cwd=_BACKEND, env=child_env_map, timeout=timeout)
-        except Exception as exc:
-            outcome = {"status": "error", "seconds": round(time.monotonic() - t0, 3), "stderr": str(exc)}
-        status, cost = str(outcome.get("status") or "error"), _cost(outcome)
-        record = _record(case, meta, venv_ok, status, float(outcome.get("seconds") or 0), cost)
-        if status == "ok":
-            verdict = outcome.get("verdict") or {}
-            record.update({key: verdict.get(key) for key in _VERDICT_KEYS})
-            record["flagged"], record["confirmed"] = is_flagged(verdict), is_confirmed(verdict)
-        elif status == "error":
-            record["error"] = _tail(str(outcome.get("stderr") or ""), secrets)
-        spend = _save(results, spend_path, spend, record, secrets)
-        done.add(case_id)
-        print(f"{case_id} {status} {cost:.4f}", file=sys.stderr)
+            print(f"{case_id} {status} {cost:.4f}", file=sys.stderr)
+        finally:
+            if not keep_venv:
+                _drop_venv(replay_root, replay_dir)
     return 0
 
 
@@ -344,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replay-root", type=Path)
     parser.add_argument("--results", type=Path)
     parser.add_argument("--venv", action="store_true")
+    parser.add_argument("--keep-venv", action="store_true")
+    parser.add_argument("--min-free-gb", type=float, default=_MIN_FREE_GB)
     parser.add_argument("--verify", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-usd", type=float, default=9.0)
@@ -359,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     return run_bench(
         args.cases, args.src_root, args.replay_root, args.results, use_venv=args.venv,
         verify=args.verify, dry_run=args.dry_run, max_usd=args.max_usd, limit=args.limit, timeout=args.timeout,
+        keep_venv=args.keep_venv, min_free_gb=args.min_free_gb,
     )
 
 
