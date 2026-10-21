@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 from scripts.bench.mine import (
@@ -160,6 +161,7 @@ def test_revert_is_positive_with_revert_confidence(tmp_path: Path) -> None:
     assert case.fix_subject.startswith('Revert "')
     assert case.case_id == f"repo-{a_sha[:8]}-{b_sha[:8]}"
     assert case.repo == "repo"
+    assert case.pair_link == "shared-file"
     assert "shared.py" in case.a["files"] and "shared.py" in case.b["files"]
 
 
@@ -214,10 +216,159 @@ def test_pair_needs_a_shared_file(tmp_path: Path) -> None:
     _git(repo, "revert", "--no-edit", b_sha, day=3)
 
     changes, fixes, broke = _broke(repo)
+    drops: Counter[str] = Counter()
 
     assert any(fix.kind == "revert" and fix.reverted_sha == b_sha for fix in fixes)
     assert broke == []
-    assert mine_cases(repo, changes, fixes) == []
+    assert mine_cases(repo, changes, fixes, drops=drops) == []
+    assert drops["no B found"] == 0
+    assert drops["no A in window"] == 0
+    assert drops["no shared link"] == 1
+
+
+def test_reverted_sha_maps_to_containing_merge(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    _commit(repo, "base", 0, {"shared.py": "base\n"})
+    a_sha = _commit(repo, "edit shared in A", 1, {"shared.py": "from A\n"})
+    _git(repo, "checkout", "-q", "-b", "feature")
+    feature = _commit(repo, "edit shared on branch", 2, {"shared.py": "from feature\n"})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "--no-ff", "-m", "Merge feature into main", "feature", day=3)
+    merge = _rev(repo)
+    _git(repo, "revert", "--no-edit", feature, day=4)
+
+    changes, fixes, broke = _broke(repo)
+    shas = {change.sha for change in changes}
+
+    assert feature not in shas
+    assert len(fixes) == 1
+    assert fixes[0].kind == "revert"
+    assert fixes[0].reverted_sha == feature
+    assert len(broke) == 1
+    case = broke[0]
+    assert case.gt_kind == "revert"
+    assert case.confidence == "revert"
+    assert case.pair_link == "shared-file"
+    assert case.a["sha"] == a_sha
+    assert case.b["sha"] == merge
+    assert case.b["subject"] == "Merge feature into main"
+
+
+def test_revert_subject_pr_maps_to_merged_change(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    _commit(repo, "base", 0, {"shared.py": "base\n"})
+    a_sha = _commit(repo, "edit shared in A", 1, {"shared.py": "from A\n"})
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _commit(repo, "Add widget (#42)", 2, {"shared.py": "widget\n"})
+    _git(repo, "checkout", "-q", "main")
+    _git(
+        repo,
+        "merge",
+        "--no-ff",
+        "-m",
+        "Merge pull request #42 from dev/feature",
+        "feature",
+        day=3,
+    )
+    merge = _rev(repo)
+    fix_sha = _commit(repo, 'Revert "Add widget (#42)" (#99)', 4, {"shared.py": "from A\n"})
+
+    _changes, fixes, broke = _broke(repo)
+
+    assert len(fixes) == 1
+    assert fixes[0].kind == "revert"
+    assert fixes[0].reverted_sha is None
+    assert len(broke) == 1
+    case = broke[0]
+    assert case.gt_kind == "revert"
+    assert case.confidence == "revert"
+    assert case.pair_link == "shared-file"
+    assert case.a["sha"] == a_sha
+    assert case.b["sha"] == merge
+    assert case.b["pr"] == 42
+    assert case.fix_sha == fix_sha
+    assert case.b["subject"] != 'Add widget (#42)'
+
+
+def test_followup_fix_ground_truth(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    _commit(repo, "base", 0, {"readme.md": "r\n"})
+    _commit(repo, "Document prefixUrl and debug logging", 1, {"readme.md": "note\n"})
+    a_sha = _commit(repo, "Add parser", 2, {"parser.py": "A\n"})
+    b_sha = _commit(repo, "Tighten parser", 3, {"parser.py": "B\n"})
+    fix_sha = _commit(repo, "Fix regression in parser", 4, {"parser.py": "fixed\n"})
+
+    changes, fixes, broke = _broke(repo)
+
+    assert [fix.change.subject for fix in fixes] == ["Fix regression in parser"]
+    assert fixes[0].kind == "followup-fix"
+    assert len(broke) == 1
+    case = broke[0]
+    assert case.gt_kind == "followup-fix"
+    assert case.confidence == "weak"
+    assert case.pair_link == "shared-file"
+    assert case.a["sha"] == a_sha
+    assert case.b["sha"] == b_sha
+    assert case.fix_sha == fix_sha
+    assert "parser.py" in case.a["files"] and "parser.py" in case.b["files"]
+    assert changes[1].subject == "Document prefixUrl and debug logging"
+
+
+def test_followup_fix_outside_window_is_dropped(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    _commit(repo, "base", 0, {"readme.md": "r\n"})
+    _commit(repo, "Add parser", 1, {"parser.py": "A\n"})
+    _commit(repo, "Tighten parser", 2, {"parser.py": "B\n"})
+    _commit(repo, "Fix regression in parser", 6, {"parser.py": "fixed\n"})
+
+    changes = integrated_changes(repo, "main", 20)
+    fixes = find_fix_events(repo, changes)
+    drops: Counter[str] = Counter()
+    cases = mine_cases(repo, changes, fixes, drops=drops)
+
+    assert [fix.kind for fix in fixes] == ["followup-fix"]
+    assert [case for case in cases if case.label == "broke"] == []
+    assert drops["no B found"] == 1
+    assert drops["no A in window"] == 0
+    assert drops["no shared link"] == 0
+
+
+def test_pair_link_when_fix_touches_both(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    _commit(repo, "base", 0, {"readme.md": "r\n"})
+    a_sha = _commit(repo, "edit a", 1, {"a.py": "A\n"})
+    b_sha = _commit(repo, "edit b", 2, {"b.py": "B\n"})
+    fix_sha = _commit(repo, "🐛 Restore both sides", 3, {"a.py": "A2\n", "b.py": "B2\n"})
+
+    _changes, fixes, broke = _broke(repo)
+
+    assert [fix.kind for fix in fixes] == ["followup-fix"]
+    assert len(broke) == 1
+    case = broke[0]
+    assert case.gt_kind == "followup-fix"
+    assert case.confidence == "weak"
+    assert case.pair_link == "fix-touches-both"
+    assert case.a["sha"] == a_sha
+    assert case.b["sha"] == b_sha
+    assert case.fix_sha == fix_sha
+    assert set(case.a["files"]).isdisjoint(case.b["files"])
+
+
+def test_followup_fix_ignores_one_sided_touch(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    _commit(repo, "base", 0, {"readme.md": "r\n"})
+    _commit(repo, "edit a", 1, {"a.py": "A\n"})
+    _commit(repo, "edit b", 2, {"b.py": "B\n"})
+    _commit(repo, "Fix bug in b only", 3, {"b.py": "B2\n"})
+
+    changes = integrated_changes(repo, "main", 20)
+    fixes = find_fix_events(repo, changes)
+    drops: Counter[str] = Counter()
+    broke = [case for case in mine_cases(repo, changes, fixes, drops=drops) if case.label == "broke"]
+
+    assert [fix.kind for fix in fixes] == ["followup-fix"]
+    assert broke == []
+    assert drops["no shared link"] == 1
 
 
 def test_out_of_window_fix_is_ignored(tmp_path: Path) -> None:
@@ -313,8 +464,16 @@ def test_cli_writes_jsonl_counts(tmp_path: Path, capsys) -> None:
     rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
 
     assert code == 0
+    assert "fix events: 1" in printed
+    assert "fix revert: 1" in printed
+    assert "fix merge-fix: 0" in printed
+    assert "fix followup-fix: 0" in printed
+    assert "dropped no B found: 0" in printed
+    assert "dropped no A in window: 0" in printed
+    assert "dropped no shared link: 0" in printed
     assert "label broke: 1" in printed
     assert "confidence revert: 1" in printed
     assert rows[0]["label"] == "broke"
     assert rows[0]["confidence"] == "revert"
+    assert rows[0]["pair_link"] == "shared-file"
     assert rows[0]["b"]["files"] == ["shared.py"]

@@ -22,7 +22,15 @@ _DAY = 86400
 _MERGE_PR_RE = re.compile(r"^Merge pull request #(\d+)\b")
 _TRAILING_PR_RE = re.compile(r"\(#(\d+)\)\s*$")
 _REVERT_SHA_RE = re.compile(r"This reverts commit ([0-9a-fA-F]{7,40})")
+_REVERT_INNER_PR_RE = re.compile(r'^Revert ".*\(#(\d+)\)"')
 _PR_RE = re.compile(r"#(\d+)")
+# Letter boundary so "prefix" and "debug" are not fix words. "fixed" still matches.
+_FIX_WORD_RE = re.compile(
+    r"(?<![A-Za-z])(?:fix|bug|regression|hotfix|broken|repair|correct|restore)|🐛|🚑",
+    re.IGNORECASE,
+)
+_FOLLOWUP_DAYS = 3
+_FOLLOWUP_GAP = 15
 _MERGE_FIX_RE = re.compile(
     r"fix(?:ed)? (?:the )?merge"
     r"|merge (?:conflict|fix|skew)"
@@ -67,10 +75,11 @@ class Case:
     confidence: str
     fix_sha: str | None
     fix_subject: str | None
+    pair_link: str
 
 
-def _git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(
+def _git_proc(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         ["git", "--no-pager", "-C", str(repo), *args],
         check=False,
         capture_output=True,
@@ -78,6 +87,10 @@ def _git(repo: Path, *args: str) -> str:
         encoding="utf-8",
         errors="replace",
     )
+
+
+def _git(repo: Path, *args: str) -> str:
+    proc = _git_proc(repo, *args)
     if proc.returncode != 0:
         detail = proc.stderr.strip() or f"git {args[0]} failed"
         raise RuntimeError(detail)
@@ -149,8 +162,66 @@ def _revert_target(subject: str) -> str | None:
     return None
 
 
+def _revert_inner_pr(subject: str) -> int | None:
+    """PR named inside ``Revert "... (#123)"``, not the revert commit's own trailing PR."""
+    match = _REVERT_INNER_PR_RE.match(subject)
+    return int(match.group(1)) if match else None
+
+
+def _is_ancestor(
+    repo: Path, ancestor: str, descendant: str, cache: dict[tuple[str, str], bool]
+) -> bool:
+    key = (ancestor, descendant)
+    if key not in cache:
+        proc = _git_proc(repo, "merge-base", "--is-ancestor", ancestor, descendant)
+        cache[key] = proc.returncode == 0
+    return cache[key]
+
+
+def _resolve_commit(repo: Path, sha: str) -> str | None:
+    proc = _git_proc(repo, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
+    if proc.returncode != 0:
+        return None
+    resolved = proc.stdout.strip()
+    return resolved or None
+
+
+def _containing_change(
+    repo: Path,
+    sha: str,
+    changes: list[Change],
+    cache: dict[tuple[str, str], bool],
+) -> Change | None:
+    """First-parent change that integrated ``sha``.
+
+    ``sha`` is an ancestor of that change and not of its first parent, so a
+    side-branch commit maps to the merge that brought it onto the branch.
+    A commit already on the first-parent line maps to itself.
+    """
+    if not changes:
+        return None
+    full = _resolve_commit(repo, sha)
+    if full is None or not _is_ancestor(repo, full, changes[-1].sha, cache):
+        return None
+    lo, hi = 0, len(changes) - 1
+    found: int | None = None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if _is_ancestor(repo, full, changes[mid].sha, cache):
+            found = mid
+            hi = mid - 1
+        else:
+            lo = mid + 1
+    if found is None:
+        return None
+    change = changes[found]
+    if change.parent and _is_ancestor(repo, full, change.parent, cache):
+        return None
+    return change
+
+
 def find_fix_events(repo: Path, changes: list[Change]) -> list[FixEvent]:
-    """Reverts, then merge-fix messages. Other changes are omitted."""
+    """Reverts, merge-fix messages, then fix-word follow-ups."""
     del repo  # commit bodies were stored while reading this repo
     events: list[FixEvent] = []
     for change in changes:
@@ -163,6 +234,9 @@ def find_fix_events(repo: Path, changes: list[Change]) -> list[FixEvent]:
             continue
         if _MERGE_FIX_RE.search(text):
             events.append(FixEvent(change, "merge-fix", None, prs))
+            continue
+        if _FIX_WORD_RE.search(change.subject):
+            events.append(FixEvent(change, "followup-fix", None, prs))
     return events
 
 
@@ -192,6 +266,7 @@ def _case(
     confidence: str,
     fix_sha: str | None,
     fix_subject: str | None,
+    pair_link: str,
 ) -> Case:
     return Case(
         case_id=f"{repo_name}-{earlier.sha[:8]}-{later.sha[:8]}",
@@ -203,17 +278,14 @@ def _case(
         confidence=confidence,
         fix_sha=fix_sha,
         fix_subject=fix_subject,
+        pair_link=pair_link,
     )
 
 
-def _confidence(fix: FixEvent, broken: Change) -> str:
-    if (
-        fix.kind == "revert"
-        and fix.reverted_sha is not None
-        and _sha_match(fix.reverted_sha, broken.sha)
-    ):
+def _confidence(fix: FixEvent, how: str) -> str:
+    if fix.kind == "revert" and how in {"sha", "mapped", "pr"}:
         return "revert"
-    if fix.kind == "merge-fix" and broken.pr is not None and broken.pr in fix.prs:
+    if fix.kind == "merge-fix" and how == "pr":
         return "explicit-merge-fix"
     return "weak"
 
@@ -228,10 +300,14 @@ def mine_cases(
     pair_gap: int = 30,
     neg_ratio: float = 1.0,
     seed: int = 0,
+    drops: Counter[str] | None = None,
 ) -> list[Case]:
     """Positive fix pairs, then ``round(neg_ratio * positives)`` clean pairs."""
     repo_name = Path(repo).resolve().name
     index = {change.sha: i for i, change in enumerate(changes)}
+    if drops is None:
+        drops = Counter()
+    ancestor_cache: dict[tuple[str, str], bool] = {}
 
     def before(later: Change, days: int, gap: int) -> list[Change]:
         end = index[later.sha]
@@ -241,53 +317,94 @@ def mine_cases(
             if 0 <= later.time - change.time <= days * _DAY
         ]
 
-    def pick_broken(fix: FixEvent) -> Change | None:
-        prior = before(fix.change, max_days, max_gap_commits)
+    def in_prior(change: Change, later: Change, days: int, gap: int) -> bool:
+        end = index[later.sha]
+        at = index.get(change.sha)
+        if at is None or at < max(0, end - gap) or at >= end:
+            return False
+        delta = later.time - change.time
+        return 0 <= delta <= days * _DAY
+
+    def pick_broken(fix: FixEvent) -> tuple[Change | None, str]:
+        if fix.kind == "followup-fix":
+            days, gap = _FOLLOWUP_DAYS, _FOLLOWUP_GAP
+        else:
+            days, gap = max_days, max_gap_commits
+        prior = before(fix.change, days, gap)
         if fix.kind == "revert":
-            if fix.reverted_sha:
+            shas = _REVERT_SHA_RE.findall(fix.change.body)
+            if not shas and fix.reverted_sha:
+                shas = [fix.reverted_sha]
+            for sha in shas:
                 for change in reversed(prior):
-                    if _sha_match(fix.reverted_sha, change.sha):
-                        return change
+                    if _sha_match(sha, change.sha):
+                        return change, "sha"
+            for sha in shas:
+                mapped = _containing_change(repo, sha, changes, ancestor_cache)
+                if mapped is not None and in_prior(mapped, fix.change, days, gap):
+                    return mapped, "mapped"
+            pr = _revert_inner_pr(fix.change.subject)
+            if pr is not None:
+                for change in reversed(prior):
+                    if change.pr == pr:
+                        return change, "pr"
             quoted = _revert_target(fix.change.subject)
             if quoted is not None:
                 for change in reversed(prior):
                     if change.subject == quoted:
-                        return change
-            return None
-        for change in reversed(prior):
-            if change.pr is not None and change.pr in fix.prs:
-                return change
+                        return change, "subject"
+            return None, ""
+        if fix.kind == "merge-fix":
+            for change in reversed(prior):
+                if change.pr is not None and change.pr in fix.prs:
+                    return change, "pr"
         touched = fix.change.files
         for change in reversed(prior):
             if change.files & touched:
-                return change
-        return None
+                return change, "files"
+        return None, ""
 
-    def pick_partner(broken: Change, fix: Change) -> Change | None:
+    def pick_partner(
+        broken: Change, fix_change: Change, *, require_both: bool
+    ) -> tuple[Change | None, str | None]:
         best: Change | None = None
-        best_key: tuple[int, int, int, int] | None = None
+        best_key: tuple[int, int, int, int, int] | None = None
+        best_link: str | None = None
         for change in before(broken, pair_days, pair_gap):
             shared = change.files & broken.files
-            if not shared:
+            both = bool(fix_change.files & change.files) and bool(fix_change.files & broken.files)
+            if shared and (both or not require_both):
+                link = "shared-file"
+            elif both:
+                link = "fix-touches-both"
+            else:
                 continue
             key = (
-                len(shared & fix.files),
+                1 if link == "shared-file" else 0,
+                len(shared & fix_change.files),
                 len(shared),
-                len(change.files & fix.files),
+                len(change.files & fix_change.files),
                 index[change.sha],
             )
             if best_key is None or key > best_key:
-                best, best_key = change, key
-        return best
+                best, best_key, best_link = change, key, link
+        return best, best_link
 
     slots: dict[tuple[str, str], Case] = {}
     order: list[tuple[str, str]] = []
     for fix in fixes:
-        broken = pick_broken(fix)
+        broken, how = pick_broken(fix)
         if broken is None:
+            drops["no B found"] += 1
             continue
-        partner = pick_partner(broken, fix.change)
-        if partner is None:
+        if not before(broken, pair_days, pair_gap):
+            drops["no A in window"] += 1
+            continue
+        partner, link = pick_partner(
+            broken, fix.change, require_both=fix.kind == "followup-fix"
+        )
+        if partner is None or link is None:
+            drops["no shared link"] += 1
             continue
         key = (partner.sha, broken.sha)
         case = _case(
@@ -296,9 +413,10 @@ def mine_cases(
             broken,
             "broke",
             fix.kind,
-            _confidence(fix, broken),
+            _confidence(fix, how),
             fix.change.sha,
             fix.change.subject,
+            link,
         )
         if key in slots:
             if _CONF_RANK[case.confidence] > _CONF_RANK[slots[key].confidence]:
@@ -313,10 +431,17 @@ def mine_cases(
         later_index = index[later.sha]
         for fix in fixes:
             fix_change = fix.change
-            if index[fix_change.sha] <= later_index:
+            fix_index = index[fix_change.sha]
+            if fix_index <= later_index:
                 continue
+            if fix.kind == "followup-fix":
+                if fix_index - later_index > _FOLLOWUP_GAP:
+                    continue
+                limit = _FOLLOWUP_DAYS * _DAY
+            else:
+                limit = max_days * _DAY
             delta = fix_change.time - later.time
-            if delta < 0 or delta > max_days * _DAY:
+            if delta < 0 or delta > limit:
                 continue
             if fix_change.files & watched:
                 return True
@@ -335,15 +460,21 @@ def mine_cases(
     random.Random(seed).shuffle(eligible)
     count = max(0, round(neg_ratio * len(positives)))
     negatives = [
-        _case(repo_name, earlier, later, "clean", "none", "none", None, None)
+        _case(repo_name, earlier, later, "clean", "none", "none", None, None, "shared-file")
         for earlier, later in eligible[:count]
     ]
     return positives + negatives
 
 
-def _print_counts(cases: list[Case]) -> None:
+def _print_counts(cases: list[Case], fixes: list[FixEvent], drops: Counter[str]) -> None:
+    kinds = Counter(fix.kind for fix in fixes)
     labels = Counter(case.label for case in cases)
     confidences = Counter(case.confidence for case in cases)
+    print(f"fix events: {len(fixes)}")
+    for kind in ("revert", "merge-fix", "followup-fix"):
+        print(f"fix {kind}: {kinds.get(kind, 0)}")
+    for reason in ("no B found", "no A in window", "no shared link"):
+        print(f"dropped {reason}: {drops.get(reason, 0)}")
     print(f"cases: {len(cases)}")
     for label in ("broke", "clean"):
         print(f"label {label}: {labels.get(label, 0)}")
@@ -367,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
 
     changes = integrated_changes(args.repo, args.branch, args.max_commits)
     fixes = find_fix_events(args.repo, changes)
+    drops: Counter[str] = Counter()
     cases = mine_cases(
         args.repo,
         changes,
@@ -377,12 +509,13 @@ def main(argv: list[str] | None = None) -> int:
         pair_gap=args.pair_gap,
         neg_ratio=args.neg_ratio,
         seed=args.seed,
+        drops=drops,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8") as handle:
         for case in cases:
             handle.write(json.dumps(asdict(case), ensure_ascii=False) + "\n")
-    _print_counts(cases)
+    _print_counts(cases, fixes, drops)
     return 0
 
 
