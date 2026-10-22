@@ -407,6 +407,15 @@ def test_analyze_case_projects_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         branch_tests = type("B", (), {"status": "passed", "reason": "ok"})()
         docs_sources = [1, 2, 3]
         rationale = "r" * 500
+        finding = "semantic"
+        textual_conflict = False
+        git_score = 40.0
+        model_level = "high"
+        shared_files = 2
+        overlapping_files = 1
+        symbol_overlap = ["a", "b"]
+        static_breaks = ["sig"]
+        prefilter_candidate = True
 
     class Usage:
         llm_calls = 2
@@ -435,8 +444,32 @@ def test_analyze_case_projects_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert payload["verification"] == {"status": "confirmed", "reason": "broke", "attempts": 2}
     assert payload["branch_tests"] == {"status": "passed", "reason": "ok"}
     assert payload["usage"]["llm_calls"] == 2
+    assert payload["finding"] == "semantic"
+    assert payload["app_textual_conflict"] is False
+    assert payload["git_score"] == 40.0
+    assert payload["model_level"] == "high"
+    assert payload["shared_files"] == 2
+    assert payload["overlapping_files"] == 1
+    assert payload["symbol_overlap"] == 2
+    assert payload["static_breaks"] == 1
+    assert payload["prefilter_candidate"] is True
     assert is_flagged(payload) is True
     assert is_confirmed(payload) is True
+
+
+def test_textual_conflict_finding_is_not_flagged() -> None:
+    plain = _verdict(level="high")
+    assert "finding" not in plain
+    assert is_flagged(plain) is True
+
+    conflict = _verdict(level="high", verification="confirmed", branch="confirmed")
+    conflict["finding"] = "textual_conflict"
+    assert is_flagged(conflict) is False
+    assert is_confirmed(conflict) is True
+
+    semantic = _verdict(level="high")
+    semantic["finding"] = "semantic"
+    assert is_flagged(semantic) is True
 
 
 def test_child_crash_scrubs_stderr(tmp_path: Path) -> None:

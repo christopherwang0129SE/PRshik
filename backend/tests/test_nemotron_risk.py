@@ -29,6 +29,10 @@ def test_combine_scores_keeps_textual_overlap() -> None:
     assert combine_scores(0, 0, overlapping_files=0) == 0.0
     blended = (0.5 * 47.5) + (0.5 * 90)
     assert combine_scores(47.5, 90, overlapping_files=1) == round(max(47.5, blended), 1)
+    # A clean git merge drops the overlap floor. True and unknown keep it.
+    assert combine_scores(80, 10, overlapping_files=1, textual_conflict=False) == 45.0
+    assert combine_scores(80, 10, overlapping_files=1, textual_conflict=True) == 80
+    assert combine_scores(80, 10, overlapping_files=1, textual_conflict=None) == 80
 
 
 def test_defaults_point_at_nemotron_on_token_factory() -> None:

@@ -215,6 +215,10 @@ class PairRisk(BaseModel):
     # e.g. "raised: confirmed by test". `blended_score` keeps the blend.
     score_note: str | None = None
     blended_score: float | None = Field(default=None, ge=0, le=100)
+    # git merge-tree --write-tree. True: conflict. False: clean. None: git could not say.
+    textual_conflict: bool | None = None
+    # A git conflict is its own category, not a semantic interaction finding.
+    finding: Literal["textual_conflict", "semantic", "none"] = "none"
 
 
 class UsageSummary(BaseModel):

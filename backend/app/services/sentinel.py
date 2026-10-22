@@ -24,9 +24,12 @@ search error leaves those prompts unchanged.
 When Nebius is configured (``NEBIUS_API_KEY`` set and ``NEBIUS_ENABLED``), the
 selected pairs are sent to NVIDIA Nemotron. The published score is an equal blend of the git
 score and the model's ``risk_score``. If the hunks overlap, the blend cannot
-fall below the git score: the model may raise a textual collision, not dismiss
-it. When they do not overlap, the blend can move either way so a semantic clash
-the diff heuristic missed can still raise the score.
+fall below the git score unless ``git merge-tree`` merged cleanly
+(``textual_conflict`` is false): the model may raise a real textual collision,
+not dismiss it. A clean merge uses the plain 0.5/0.5 blend. When hunks do not
+overlap, the blend can move either way so a semantic clash the diff heuristic
+missed can still raise the score. The floor also stays when merge-tree errors
+(``textual_conflict`` is unknown).
 
 If the key is missing, the model is disabled, the call errors or times out, or
 the reply is not a usable JSON assessment, that pair keeps the git score and
@@ -37,6 +40,7 @@ from __future__ import annotations
 import time
 from itertools import combinations
 from pathlib import Path
+from typing import Literal
 
 from app.config import settings
 from app.schemas import (
@@ -103,10 +107,20 @@ def _level(score: float) -> RiskLevel:
     return "none"
 
 
-def combine_scores(git_score: float, model_score: float, overlapping_files: int) -> float:
-    """Blend the git hunk score with the model score. See the module docstring."""
+def combine_scores(
+    git_score: float,
+    model_score: float,
+    overlapping_files: int,
+    *,
+    textual_conflict: bool | None = None,
+) -> float:
+    """Blend the git hunk score with the model score.
+
+    Overlapping hunks floor the blend at ``git_score`` unless git merged
+    cleanly (``textual_conflict is False``). Unknown (``None``) keeps the floor.
+    """
     blended = (0.5 * git_score) + (0.5 * model_score)
-    if overlapping_files > 0:
+    if overlapping_files > 0 and textual_conflict is not False:
         blended = max(git_score, blended)
     blended = min(max(blended, 0.0), 100.0)
     return round(blended, 1)
@@ -221,7 +235,12 @@ def _apply_assessment(
     completion_tokens: int,
 ) -> PairRisk:
     git_score = pair.git_score if pair.git_score is not None else pair.score
-    published = combine_scores(git_score, risk_score, pair.overlapping_files)
+    published = combine_scores(
+        git_score,
+        risk_score,
+        pair.overlapping_files,
+        textual_conflict=pair.textual_conflict,
+    )
     unsupported = claims.unsupported_claims(rationale, pair.static_compatible)
     model_level = risk_level or _level(risk_score)
     return pair.model_copy(
@@ -525,6 +544,19 @@ def _run_branch_tests(repo: Path, base_branch: str, pairs: list[PairRisk]) -> di
     return results
 
 
+def _pair_finding(pair: PairRisk) -> Literal["textual_conflict", "semantic", "none"]:
+    """Classify after scoring. A git conflict is not a semantic finding."""
+    if pair.textual_conflict is True:
+        return "textual_conflict"
+    confirmed = (
+        (pair.verification is not None and pair.verification.status == "confirmed")
+        or (pair.branch_tests is not None and pair.branch_tests.status == "confirmed")
+    )
+    if pair.level in ("high", "medium") or confirmed:
+        return "semantic"
+    return "none"
+
+
 def analyze(
     repo: Path,
     base_branch: str,
@@ -552,6 +584,14 @@ def analyze(
         if focus is None or focus in (a, b):
             pairs.append(_score_pair(diff_by_branch[a], diff_by_branch[b]))
     pairs.sort(key=lambda p: p.score, reverse=True)
+    # Git's own merge. Not an input to build_pair_prompt, so the LLM cache key
+    # (SHAs + prompt version) stays valid. The blend reads it after the model.
+    pairs = [
+        p.model_copy(
+            update={"textual_conflict": git_service.textual_conflict(repo, p.branch_a, p.branch_b)}
+        )
+        for p in pairs
+    ]
 
     signals = _prefilter_signals(repo, diff_by_branch, pairs)
     pairs = [
@@ -617,6 +657,7 @@ def analyze(
         ),
         elapsed_s=round(time.monotonic() - started, 2),
     )
+    pairs = [p.model_copy(update={"finding": _pair_finding(p)}) for p in pairs]
     return AnalyzeResponse(
         base_branch=base_branch,
         branches=branches,

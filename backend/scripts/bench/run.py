@@ -45,6 +45,9 @@ _FALSE = {"0", "false", "no", "off"}
 _VERDICT_KEYS = (
     "level", "score", "score_source", "fallback_reason", "model_score",
     "verification", "branch_tests", "docs_sources", "rationale", "usage",
+    "finding", "app_textual_conflict", "git_score", "model_level",
+    "shared_files", "overlapping_files", "symbol_overlap", "static_breaks",
+    "prefilter_candidate",
 )
 
 
@@ -71,6 +74,10 @@ def _status(verdict: dict, key: str):
 
 
 def is_flagged(verdict: dict) -> bool:
+    # A pure textual conflict is its own category, not a semantic finding.
+    # Verdicts with no ``finding`` (older results) keep the previous rule.
+    if verdict.get("finding") == "textual_conflict":
+        return False
     high = verdict.get("level") == "high"
     return high or _status(verdict, "verification") == "confirmed" or _status(verdict, "branch_tests") == "confirmed"
 
@@ -126,6 +133,15 @@ def analyze_case(replay_path: Path, verify: bool | None = None) -> dict:
             "total_tokens": int(usage.total_tokens) if usage else 0,
             "estimated_cost_usd": float(usage.estimated_cost_usd) if usage else 0.0,
         },
+        "finding": pair.finding,
+        "app_textual_conflict": pair.textual_conflict,
+        "git_score": pair.git_score,
+        "model_level": pair.model_level,
+        "shared_files": pair.shared_files,
+        "overlapping_files": pair.overlapping_files,
+        "symbol_overlap": len(pair.symbol_overlap),
+        "static_breaks": len(pair.static_breaks),
+        "prefilter_candidate": pair.prefilter_candidate,
     }
 
 
