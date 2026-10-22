@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from app.api import routes
-from app.schemas import AnalyzeResponse, GitHubPullRequest
+from app.schemas import AnalyzeResponse, GitHubPullRequest, GitHubReviewQueueItem
 from app.services import git_service, github_service
 
 
@@ -201,3 +202,284 @@ def test_sync_endpoint_returns_pull_requests_and_risk_analysis(
     assert result.repository == "example/project"
     assert result.pull_requests == [pull]
     assert result.analysis == analysis
+
+
+def test_review_queue_marks_pull_without_reviewers_as_needs_reviewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange: one PR by "seated" with nobody requested.
+    pull = GitHubPullRequest(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        head_branch="feature-7",
+        base_branch="main",
+        updated_at="2026-10-04T10:00:00Z",
+        requested_reviewers=[], 
+    )
+    monkeypatch.setattr(
+        github_service, "list_open_pull_requests", lambda *args, **kwargs: [pull]
+    )
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, Any]]:
+            return []  # BLANK 2: no reviews and no timeline events
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def get(self, url: str, *, params: dict[str, Any]) -> Response:
+            return Response()
+
+    monkeypatch.setattr(github_service.httpx, "Client", Client)
+
+    # Act
+    items = github_service.list_review_queue(
+        "example/project", {"seated", "reviewer"}, "main", review_sla_hours=24
+    )
+
+    # Assert
+    assert len(items) == 1
+    assert items[0].status == 'needs_reviewer'  # BLANK 3: the status we expect, as a string
+
+
+def test_review_queue_marks_pull_with_seated_approval_as_approved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange: one PR by "seated" with nobody requested.
+    pull = GitHubPullRequest(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        head_branch="feature-7",
+        base_branch="main",
+        updated_at="2026-10-04T10:00:00Z",
+        requested_reviewers=[], 
+    )
+    monkeypatch.setattr(
+        github_service, "list_open_pull_requests", lambda *args, **kwargs: [pull]
+    )
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, Any]]:
+            return [{"user": {"login": "reviewer"}, "state": "APPROVED"}]
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def get(self, url: str, *, params: dict[str, Any]) -> Response:
+            return Response()
+
+    monkeypatch.setattr(github_service.httpx, "Client", Client)
+
+    # Act
+    items = github_service.list_review_queue(
+        "example/project", {"seated", "reviewer"}, "main", review_sla_hours=24
+    )
+
+    # Assert
+    assert len(items) == 1
+    assert items[0].status == "approved"
+
+
+def test_review_queue_marks_pull_with_overdue_request_as_review_late(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pull = GitHubPullRequest(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        head_branch="feature-7",
+        base_branch="main",
+        updated_at="2026-10-04T10:00:00Z",
+        requested_reviewers=["reviewer"],
+    )
+    monkeypatch.setattr(
+        github_service, "list_open_pull_requests", lambda *args, **kwargs: [pull]
+    )
+
+    class Response:
+        def __init__(self, data: list[dict[str, Any]]) -> None:
+            self._data = data
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, Any]]:
+            return self._data
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def get(self, url: str, *, params: dict[str, Any]) -> Response:
+            if url.endswith("/timeline"):
+                return Response([
+                    {
+                        "event": "review_requested",
+                        "requested_reviewer": {"login": "reviewer"},
+                        "created_at": "2026-10-04T10:00:00Z",
+                    }
+                ])
+            return Response([])  # no reviews
+
+    monkeypatch.setattr(github_service.httpx, "Client", Client)
+
+    # Act: 25 hours later (SLA is 24h)
+    now = datetime(2026, 10, 5, 11, 0, 0, tzinfo=timezone.utc)
+    items = github_service.list_review_queue(
+        "example/project", {"seated", "reviewer"}, "main", review_sla_hours=24, now=now
+    )
+
+    # Assert
+    assert len(items) == 1
+    assert items[0].status == "review_late"
+    assert items[0].waiting_since == "2026-10-04T10:00:00Z"
+
+
+def test_review_queue_marks_pull_within_sla_as_awaiting_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pull = GitHubPullRequest(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        head_branch="feature-7",
+        base_branch="main",
+        updated_at="2026-10-04T10:00:00Z",
+        requested_reviewers=["reviewer"],
+    )
+    monkeypatch.setattr(
+        github_service, "list_open_pull_requests", lambda *args, **kwargs: [pull]
+    )
+
+    class Response:
+        def __init__(self, data: list[dict[str, Any]]) -> None:
+            self._data = data
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, Any]]:
+            return self._data
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def get(self, url: str, *, params: dict[str, Any]) -> Response:
+            if url.endswith("/timeline"):
+                return Response([
+                    {
+                        "event": "review_requested",
+                        "requested_reviewer": {"login": "reviewer"},
+                        "created_at": "2026-10-04T10:00:00Z",
+                    }
+                ])
+            return Response([])
+
+    monkeypatch.setattr(github_service.httpx, "Client", Client)
+
+    # Act: 2 hours later (within 24h SLA)
+    now = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
+    items = github_service.list_review_queue(
+        "example/project", {"seated", "reviewer"}, "main", review_sla_hours=24, now=now
+    )
+
+    # Assert
+    assert len(items) == 1
+    assert items[0].status == "awaiting_review"
+
+
+def test_review_queue_endpoint_returns_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = GitHubReviewQueueItem(
+        number=7,
+        title="Pull request 7",
+        author="seated",
+        url="https://github.com/example/project/pull/7",
+        status="awaiting_review",
+        reviewers=["reviewer"],
+        approved_by=[],
+        waiting_since="2026-10-04T10:00:00Z",
+    )
+    monkeypatch.setattr(routes.settings, "github_repository", "example/project")
+    monkeypatch.setattr(routes.settings, "github_seated_users", "seated,reviewer")
+    monkeypatch.setattr(routes.settings, "github_token", "")
+    monkeypatch.setattr(routes.settings, "default_base_branch", "main")
+    monkeypatch.setattr(routes.settings, "github_review_sla_hours", 24)
+    monkeypatch.setattr(
+        routes.github_service,
+        "list_review_queue",
+        lambda *args, **kwargs: [item],
+    )
+
+    result = routes.github_review_queue()
+
+    assert result.repository == "example/project"
+    assert result.review_sla_hours == 24
+    assert result.items == [item]
+
+
+def test_review_queue_endpoint_fails_when_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(routes.settings, "github_repository", "")
+    with pytest.raises(routes.HTTPException) as exc_info:
+        routes.github_review_queue()
+    assert exc_info.value.status_code == 503
+    assert "GITHUB_REPOSITORY is not configured" in exc_info.value.detail
+
+
+def test_review_queue_endpoint_converts_github_error_to_502(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(routes.settings, "github_repository", "example/project")
+    monkeypatch.setattr(routes.settings, "github_seated_users", "seated")
+
+    def _raise(*args: Any, **kwargs: Any) -> list[Any]:
+        raise github_service.GitHubError("Upstream error")
+
+    monkeypatch.setattr(routes.github_service, "list_review_queue", _raise)
+
+    with pytest.raises(routes.HTTPException) as exc_info:
+        routes.github_review_queue()
+    assert exc_info.value.status_code == 502
+    assert "Upstream error" in exc_info.value.detail

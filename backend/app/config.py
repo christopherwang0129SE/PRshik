@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     github_repository: str = ""
     github_token: str = ""
     github_seated_users: str = ""
+    github_review_sla_hours: int = 24
 
     # --- App ---
     default_base_branch: str = "main"
