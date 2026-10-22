@@ -453,7 +453,8 @@ def run_bench(
                 reported = meta.get("path") if isinstance(meta, dict) else None
                 if reported:
                     replay_dir = Path(str(reported))
-            if failed or not (meta or {}).get("b"):
+            empty = bool((meta or {}).get("a_empty") or (meta or {}).get("b_empty"))
+            if failed or not (meta or {}).get("b") or empty:
                 record = _record(case, meta, None, "replay_failed", time.monotonic() - t0, 0.0)
                 if failed:
                     record["error"] = failed
