@@ -31,6 +31,16 @@ overlap, the blend can move either way so a semantic clash the diff heuristic
 missed can still raise the score. The floor also stays when merge-tree errors
 (``textual_conflict`` is unknown).
 
+A clean merge is published as high only when the model itself said high
+(``score_source == "model"`` and ``model_level == "high"``). Otherwise the
+score is capped at 69, so the level is at most medium, and ``score_note``
+says why when that cap changed the score. The cap runs after verify-by-test.
+``is_high_risk`` reads the level and the score, and ``verify_min_score`` is
+70, so capping first would drop pairs whose blend cleared 70 only because
+the git score lifted a lower model assessment. A verification that already
+confirmed is left alone. Branch tests run after the cap and still raise a
+confirmed pair.
+
 If the key is missing, the model is disabled, the call errors or times out, or
 the reply is not a usable JSON assessment, that pair keeps the git score and
 ``fallback_reason`` says why. A model failure never fails the request.
@@ -641,6 +651,9 @@ def _verify_high_risk(
 CONFIRMED_NOTE = "raised: confirmed by test"
 BRANCH_TEST_NOTE = "raised: confirmed by branch test"
 BOTH_NOTE = "raised: confirmed by branch test and intent test"
+# High starts at 70. One point under keeps the level at medium.
+CLEAN_MERGE_CAP = 69.0
+CLEAN_MERGE_NOTE = "capped: clean git merge without a high model assessment"
 
 
 def apply_verification(pair: PairRisk, result: Verification) -> PairRisk:
@@ -673,10 +686,14 @@ def apply_branch_tests(pair: PairRisk, result: BranchTests) -> PairRisk:
     if result.status == "confirmed":
         floor = float(settings.verify_confirmed_floor)
         intent = pair.verification is not None and pair.verification.status == "confirmed"
+        # The clean-merge cap lowers ``score`` and keeps the blend in
+        # ``blended_score``. Floor the higher of the two so a blend already
+        # above the floor is not pulled down to it.
+        basis = pair.score if pair.blended_score is None else max(pair.score, pair.blended_score)
         update.update(
             {
                 "blended_score": pair.blended_score if pair.blended_score is not None else pair.score,
-                "score": round(min(max(pair.score, floor), 100.0), 1),
+                "score": round(min(max(basis, floor), 100.0), 1),
                 "level": "high",
                 "score_note": BOTH_NOTE if intent else BRANCH_TEST_NOTE,
             }
@@ -699,6 +716,34 @@ def _run_branch_tests(repo: Path, base_branch: str, pairs: list[PairRisk]) -> di
             continue
         results[key] = branch_tests.check_pair(repo, base_branch, pair.branch_a, pair.branch_b)
     return results
+
+
+def _cap_clean_merge(pair: PairRisk) -> PairRisk:
+    """High on a clean merge needs the model itself to have said high.
+
+    Called after verify-by-test and before branch tests. A verification that
+    already confirmed raised the uncapped score and is left alone. Any other
+    clean pair is capped at ``CLEAN_MERGE_CAP`` unless ``score_source`` is
+    ``model`` and ``model_level`` is ``high``. The note is set only when the
+    score changes. ``textual_conflict`` true or unknown is unchanged.
+    """
+    if pair.textual_conflict is not False:
+        return pair
+    if pair.score_source == "model" and pair.model_level == "high":
+        return pair
+    if pair.verification is not None and pair.verification.status == "confirmed":
+        return pair
+    if pair.score <= CLEAN_MERGE_CAP:
+        return pair
+    score = min(pair.score, CLEAN_MERGE_CAP)
+    return pair.model_copy(
+        update={
+            "blended_score": pair.score,
+            "score": score,
+            "level": _level(score),
+            "score_note": CLEAN_MERGE_NOTE,
+        }
+    )
 
 
 def _pair_finding(pair: PairRisk) -> Literal["textual_conflict", "semantic", "none"]:
@@ -782,6 +827,13 @@ def analyze(
             repo, base_branch, pairs, meter=meter, use_cache=use_cache, allowed=verify_allowed
         )
         pairs.sort(key=lambda p: p.score, reverse=True)
+
+    # After verify-by-test: is_high_risk reads level and score, and the cap
+    # (69) sits under verify_min_score (70), so doing this earlier would shrink
+    # who gets verified. Before branch tests, which still override a confirm.
+    # A verification confirm is not recapped; it already used the uncapped score.
+    pairs = [_cap_clean_merge(p) for p in pairs]
+    pairs.sort(key=lambda p: p.score, reverse=True)
 
     if branch_results:
         pairs = [

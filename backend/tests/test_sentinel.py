@@ -9,7 +9,7 @@ import pytest
 
 from app.config import settings
 from app.schemas import BranchDiff, BranchTests, ChangedFile, FileCollision, PairRisk, Verification
-from app.services import sentinel
+from app.services import sentinel, verifier
 from app.services.nemotron import build_pair_prompt
 
 
@@ -328,3 +328,225 @@ def test_excerpt_paths_non_code_and_test_data_rank_with_docs() -> None:
 def test_excerpt_paths_counts_tooling_files_as_config(path: str) -> None:
     pair = _risk(shared_files=1, collisions=[_collision("CHANGES.md", False)])
     assert sentinel._excerpt_paths(pair, ["CHANGES.md"], ["CHANGES.md", path]) == [path]
+
+
+def _clean_overlap_repo(tmp_path: Path) -> Path:
+    """Two files, edits two lines apart.
+
+    The hunk heuristic overlaps both files (git score >= 70) and git merges cleanly.
+    """
+    repo = tmp_path / "clean-high"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    base = [f"line {i}" for i in range(1, 21)]
+    for name in ("app.py", "lib.py"):
+        (repo / name).write_text("\n".join(base) + "\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+
+    def branch(name: str, index: int, text: str) -> None:
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "checkout", "-q", "-b", name)
+        for filename in ("app.py", "lib.py"):
+            lines = list(base)
+            lines[index] = text
+            (repo / filename).write_text("\n".join(lines) + "\n")
+        _git(repo, "commit", "-qam", name)
+
+    branch("near-a", 4, "line 5 CHANGED BY A")
+    branch("near-b", 6, "line 7 CHANGED BY B")
+    _git(repo, "checkout", "-q", "main")
+    return repo
+
+
+def test_clean_merge_high_needs_a_high_model_assessment() -> None:
+    note = sentinel.CLEAN_MERGE_NOTE
+
+    stayed = sentinel._cap_clean_merge(_risk(
+        score=88, level="high", textual_conflict=False, score_source="model",
+        model_level="high", model_score=90, git_score=80,
+    ))
+    assert (stayed.score, stayed.level, stayed.score_note, stayed.blended_score) == (88, "high", None, None)
+
+    lifted = sentinel._cap_clean_merge(_risk(
+        score=80, level="high", textual_conflict=False, score_source="model",
+        model_level="medium", model_score=50, git_score=100,
+    ))
+    assert lifted.score == 69.0 and lifted.level == "medium"
+    assert lifted.score_note == note and lifted.blended_score == 80
+    assert lifted.model_level == "medium" and lifted.model_score == 50
+
+    low_model = sentinel._cap_clean_merge(_risk(
+        score=85, level="high", textual_conflict=False, score_source="model",
+        model_level="low", model_score=20, git_score=100,
+    ))
+    assert low_model.score == 69.0 and low_model.level == "medium" and low_model.score_note == note
+
+    fallback = sentinel._cap_clean_merge(_risk(
+        score=80, level="high", textual_conflict=False, score_source="git",
+        fallback_reason="no_api_key", git_score=80,
+    ))
+    assert fallback.score == 69.0 and fallback.level == "medium"
+    assert fallback.score_note == note and fallback.blended_score == 80
+    assert fallback.fallback_reason == "no_api_key" and fallback.git_score == 80
+
+    for conflict in (True, None):
+        kept = sentinel._cap_clean_merge(_risk(
+            score=90, level="high", textual_conflict=conflict, score_source="git",
+            fallback_reason="no_api_key", git_score=90,
+        ))
+        assert kept.score == 90 and kept.level == "high"
+        assert kept.score_note is None and kept.blended_score is None
+
+    unchanged = sentinel._cap_clean_merge(_risk(
+        score=69, level="medium", textual_conflict=False, score_source="git", git_score=69,
+    ))
+    assert unchanged.score == 69 and unchanged.level == "medium" and unchanged.score_note is None
+
+    confirmed = sentinel._cap_clean_merge(_risk(
+        score=90, level="high", textual_conflict=False, score_source="model",
+        model_level="medium", model_score=40, git_score=100,
+        blended_score=80, score_note=sentinel.CONFIRMED_NOTE,
+        verification=Verification(status="confirmed"),
+    ))
+    assert confirmed.score == 90 and confirmed.level == "high"
+    assert confirmed.score_note == sentinel.CONFIRMED_NOTE and confirmed.blended_score == 80
+
+    capped = sentinel._cap_clean_merge(_risk(
+        score=80, level="high", textual_conflict=False, score_source="git",
+        fallback_reason="no_api_key", git_score=80,
+    ))
+    raised = sentinel.apply_branch_tests(capped, BranchTests(status="confirmed"))
+    assert raised.level == "high" and raised.score == 90.0
+    assert raised.score_note == sentinel.BRANCH_TEST_NOTE and raised.blended_score == 80
+
+    above = sentinel._cap_clean_merge(_risk(
+        score=95, level="high", textual_conflict=False, score_source="git",
+        fallback_reason="no_api_key", git_score=95,
+    ))
+    kept_high = sentinel.apply_branch_tests(above, BranchTests(status="confirmed"))
+    assert kept_high.level == "high" and kept_high.score == 95.0
+    assert kept_high.score_note == sentinel.BRANCH_TEST_NOTE and kept_high.blended_score == 95
+
+
+def test_clean_merge_git_fallback_is_capped(tmp_path: Path) -> None:
+    pair = sentinel.analyze(_clean_overlap_repo(tmp_path), "main", ["near-a", "near-b"]).pairs[0]
+    assert pair.textual_conflict is False
+    assert pair.score_source == "git" and pair.fallback_reason == "no_api_key"
+    assert pair.overlapping_files == 2
+    assert pair.git_score is not None and pair.git_score > 69
+    assert pair.score == 69.0 and pair.level == "medium"
+    assert pair.score_note == sentinel.CLEAN_MERGE_NOTE
+    assert pair.blended_score == pair.git_score
+    assert pair.finding == "semantic"
+
+
+def test_textual_conflict_true_or_unknown_is_not_capped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_overlap_repo(tmp_path)
+
+    def analyze(value: bool | None):
+        monkeypatch.setattr("app.services.git_service.textual_conflict", lambda *_a, **_k: value)
+        return sentinel.analyze(repo, "main", ["near-a", "near-b"]).pairs[0]
+
+    conflict = analyze(True)
+    assert conflict.textual_conflict is True
+    assert conflict.git_score is not None and conflict.score == conflict.git_score
+    assert conflict.score > 69 and conflict.level == "high" and conflict.score_note is None
+    assert conflict.finding == "textual_conflict"
+
+    unknown = analyze(None)
+    assert unknown.textual_conflict is None
+    assert unknown.git_score is not None and unknown.score == unknown.git_score
+    assert unknown.score > 69 and unknown.level == "high" and unknown.score_note is None
+
+
+def _assessment(score: float, level: str, rationale: str):
+    def complete(_prompt: str) -> str:
+        return json.dumps({"risk_score": score, "risk_level": level, "rationale": rationale})
+
+    return complete
+
+
+def test_clean_merge_model_high_stays_high(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "nebius_api_key", "test-key")
+    monkeypatch.setattr("app.services.nemotron.complete", _assessment(90, "high", "Breaks the caller."))
+    pair = sentinel.analyze(_clean_overlap_repo(tmp_path), "main", ["near-a", "near-b"]).pairs[0]
+    assert pair.textual_conflict is False
+    assert pair.score_source == "model" and pair.model_level == "high"
+    assert pair.score >= 70 and pair.level == "high"
+    assert pair.score_note is None and pair.blended_score is None
+
+
+def test_clean_merge_model_medium_is_capped_after_verify_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The published score is capped, but verify still selected the uncapped blend.
+
+    ``is_high_risk`` reads level and score. After the cap both sit under 70, so
+    selecting after the cap would skip this pair.
+    """
+    monkeypatch.setattr(settings, "nebius_api_key", "test-key")
+    monkeypatch.setattr("app.services.nemotron.complete", _assessment(69, "medium", "Coordinate."))
+    monkeypatch.setattr(settings, "branch_tests_enabled", False)
+    pair = sentinel.analyze(
+        _clean_overlap_repo(tmp_path), "main", ["near-a", "near-b"],
+        verify=True, verify_allowed=False,
+    ).pairs[0]
+    assert pair.textual_conflict is False
+    assert pair.score_source == "model" and pair.model_level == "medium" and pair.model_score == 69
+    assert pair.verification is not None and pair.verification.status == "skipped"
+    assert pair.blended_score is not None and pair.blended_score >= 70
+    assert pair.score == 69.0 and pair.level == "medium"
+    assert pair.score_note == sentinel.CLEAN_MERGE_NOTE
+    uncapped = pair.model_copy(update={
+        "score": pair.blended_score, "level": "high", "score_note": None, "blended_score": None,
+    })
+    assert verifier.is_high_risk(uncapped) is True
+    assert verifier.is_high_risk(pair) is False
+
+
+def test_clean_merge_verification_confirm_is_not_recapped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "nebius_api_key", "test-key")
+    monkeypatch.setattr("app.services.nemotron.complete", _assessment(69, "medium", "Coordinate."))
+    monkeypatch.setattr(settings, "branch_tests_enabled", False)
+    monkeypatch.setattr(settings, "verify_allowed_roots", str(tmp_path))
+    monkeypatch.setattr(
+        "app.services.verifier.verify_pair",
+        lambda *_a, **_k: Verification(status="confirmed", reason="shown"),
+    )
+    pair = sentinel.analyze(
+        _clean_overlap_repo(tmp_path), "main", ["near-a", "near-b"],
+        verify=True, verify_allowed=True,
+    ).pairs[0]
+    assert pair.model_level == "medium"
+    assert pair.verification is not None and pair.verification.status == "confirmed"
+    assert pair.level == "high" and pair.score == 90.0
+    assert pair.score_note == sentinel.CONFIRMED_NOTE
+    assert pair.blended_score is not None and pair.blended_score >= 70
+
+
+def test_clean_merge_cap_still_yields_to_a_confirmed_branch_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "verify_allowed_roots", str(tmp_path))
+    monkeypatch.setattr(
+        "app.services.branch_tests.check_pair",
+        lambda *_a, **_k: BranchTests(status="confirmed"),
+    )
+    pair = sentinel.analyze(
+        _clean_overlap_repo(tmp_path), "main", ["near-a", "near-b"],
+        verify=True, verify_allowed=True,
+    ).pairs[0]
+    assert pair.textual_conflict is False
+    assert pair.fallback_reason == "no_api_key" and pair.score_source == "git"
+    assert pair.git_score is not None and pair.git_score > 69
+    assert pair.branch_tests is not None and pair.branch_tests.status == "confirmed"
+    assert pair.level == "high" and pair.score == 90.0
+    assert pair.score_note == sentinel.BRANCH_TEST_NOTE
+    assert pair.blended_score == pair.git_score
