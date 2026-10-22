@@ -257,15 +257,28 @@ def test_complete_uses_token_factory_chat_completions(monkeypatch: pytest.Monkey
     assert created["seed"] == 42
 
 
-def test_risk_prompt_asks_for_combined_behaviour() -> None:
-    """The system prompt must ask for the joint post-merge behaviour, not
-    just textual overlap."""
+def test_risk_prompt_scores_semantic_breakage_only() -> None:
+    """Score semantic breakage after git merges, not textual overlap."""
     from app.services.nemotron import SYSTEM_PROMPT
 
     lowered = SYSTEM_PROMPT.lower()
-    assert "combined" in lowered
-    assert "after both branches land" in lowered
     assert "semantic" in lowered
+    assert "after both branches land" in lowered
+    assert "git merges" in lowered
+    assert "textual merge conflict" in lowered
+    assert "must not raise" in lowered
+    assert "not evidence" in lowered
+    assert "at most 20" in lowered
+    assert "at most 40" in lowered
+    assert "risk_score >= 70" in SYSTEM_PROMPT
+    assert "both sides" in lowered
+    assert "[tool.black]" in SYSTEM_PROMPT
+    assert "[tool.ruff]" in SYSTEM_PROMPT
+    assert "dependency versions" in lowered
+    assert "recursion" in lowered
+    assert "parameters only" in lowered
+    assert "will fail" in lowered
+    assert '"risk_level": "none"|"low"|"medium"|"high"' in SYSTEM_PROMPT
 
 
 def test_risk_prompt_contains_both_branches_and_function_context(
@@ -409,4 +422,4 @@ def test_empty_static_section_says_only_parameters_were_compared() -> None:
     assert "Static signature checks (exact, parameters only):" in prompt
     assert "return values and behaviour were NOT checked" in prompt
     assert "PARAMETERS only" in SYSTEM_PROMPT
-    assert cache.PROMPT_VERSION == "risk-v9"
+    assert cache.PROMPT_VERSION == "risk-v10"

@@ -32,13 +32,30 @@ MAX_RATIONALE_CHARS = 500
 _LEVELS: set[str] = {"none", "low", "medium", "high"}
 
 SYSTEM_PROMPT = (
-    "You assess whether two in-flight git branches are likely to conflict or "
-    "break each other when both land on the same base branch. Judge the "
-    "COMBINED behaviour after both branches land: look for semantic conflicts "
-    "the diff heuristic cannot see — changed assumptions, operation order, "
-    "invariants, incompatible edits to the same logic, signature changes "
-    "versus call sites. The git heuristic is context only: it sees textual "
-    "hunk overlap and adjacency, not meaning. The static signature checks are "
+    "You score ONLY semantic breakage after both branches land and git merges "
+    "them: whether the two branches break each other. Judge changed assumptions, "
+    "operation order, invariants, incompatible edits to the same logic, and "
+    "signature changes versus call sites. "
+    "Textual merge conflicts are detected separately by git (the git merge-tree "
+    "line) and must not raise the score. Hunks being adjacent or in the same "
+    "file is not evidence. "
+    "Independent additions score at most 20: new enum members, new list or dict "
+    "entries, new locale or translation files, changelog or docs lines, version "
+    "bumps, separate new functions, and independent regex constants. "
+    "Use risk_level \"high\" or risk_score >= 70 ONLY when you can name a "
+    "concrete mechanism with both sides: a symbol, value, config setting or "
+    "behaviour that one branch changes AND specific code from the other branch "
+    "that depends on the old behaviour or violates the new one. If you cannot "
+    "name both sides, score at most 40. "
+    "If one branch changes project-wide configuration (formatter, linter, "
+    "type-checker or test settings such as [tool.black], [tool.ruff], flake8, "
+    "mypy, pytest options, or dependency versions), check whether code added by "
+    "the other branch would violate or be affected by the new setting. That can "
+    "be a real break. "
+    "Behaviour interactions count: one branch changes how a function or class "
+    "behaves (recursion, ordering, wrapping or unwrapping, caching, defaults) "
+    "and the other adds callers, inputs or features that hit the changed path. "
+    "The static signature checks are "
     "exact (both sides were parsed) but compare PARAMETERS only: a changed "
     "return value, return type or behaviour is never checked by them, so judge "
     "those from the diff yourself. A call site listed as not matching WILL "
@@ -48,8 +65,8 @@ SYSTEM_PROMPT = (
     "Reply with one JSON object and no other text, using this shape: "
     '{"risk_score": <number 0-100>, "risk_level": "none"|"low"|"medium"|"high", '
     '"rationale": "<one or two sentences>"}. '
-    "0 means the branches do not interfere. 100 means a merge will almost "
-    "certainly conflict or invalidate the other branch's change."
+    "0 means the branches do not interfere. 100 means both landing will almost "
+    "certainly break the other branch's behaviour."
 )
 
 
@@ -324,6 +341,26 @@ def _collision_lines(pair: PairRisk) -> list[str]:
     return lines
 
 
+def _git_merge_line(pair: PairRisk) -> str:
+    if pair.textual_conflict is True:
+        return (
+            "Git merge (git merge-tree): reports a TEXTUAL CONFLICT "
+            "(reported separately; score only semantic effects)"
+        )
+    if pair.textual_conflict is False:
+        return "Git merge (git merge-tree): merges cleanly"
+    return "Git merge (git merge-tree): unknown"
+
+
+def _prompt_git_rationale(pair: PairRisk) -> str:
+    text = pair.git_rationale or pair.rationale
+    # Adjacent hunks make the heuristic say a conflict is likely even when
+    # merge-tree already merged cleanly. Don't hand that claim to the model.
+    if pair.textual_conflict is False and "conflict is likely" in text.lower():
+        return "Hunks are close together, but git merges them cleanly."
+    return text
+
+
 def build_pair_prompt(
     *,
     base_branch: str,
@@ -345,7 +382,8 @@ def build_pair_prompt(
             f"score={git_score} shared_files={pair.shared_files} "
             f"overlapping_files={pair.overlapping_files}"
         ),
-        f"Git rationale: {pair.git_rationale or pair.rationale}",
+        _git_merge_line(pair),
+        f"Git rationale: {_prompt_git_rationale(pair)}",
         (
             "Static prefilter: symbols one branch changes that the other changes or calls: "
             + (", ".join(pair.symbol_overlap[:12]) if pair.symbol_overlap else "none")

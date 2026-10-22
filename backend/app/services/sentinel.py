@@ -38,6 +38,7 @@ the reply is not a usable JSON assessment, that pair keeps the git score and
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable, Sequence
 from itertools import combinations
 from pathlib import Path
 from typing import Literal
@@ -191,13 +192,169 @@ def _commits(repo: Path, branch: str) -> list[str]:
         return []
 
 
-def _excerpt(repo: Path, base_branch: str, pair: PairRisk) -> str:
-    paths = [c.path for c in pair.collisions if c.overlapping] or [
-        c.path for c in pair.collisions
+# Tooling files. Match the basename; ``tsconfig*.json`` and ``.eslintrc*`` are prefixes.
+_CONFIG_NAMES = frozenset({
+    "pyproject.toml",
+    "setup.cfg",
+    "tox.ini",
+    ".flake8",
+    "ruff.toml",
+    ".ruff.toml",
+    "mypy.ini",
+    ".pre-commit-config.yaml",
+    "package.json",
+    "biome.json",
+})
+_DOC_SUFFIXES = frozenset({".md", ".rst", ".txt"})
+# A path with none of these suffixes is non-code, so it counts as test data
+# unless it is config or docs. ``tests/**/data/`` is test data even when the
+# file itself is code.
+_CODE_SUFFIXES = frozenset({
+    ".py", ".pyi", ".pyx",
+    ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
+    ".go", ".rs", ".java", ".kt", ".kts", ".scala",
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp",
+    ".cs", ".swift", ".m", ".mm",
+    ".rb", ".php", ".lua", ".pl", ".pm",
+    ".ex", ".exs", ".erl", ".hs", ".ml", ".mli",
+    ".clj", ".cljs", ".dart",
+    ".vue", ".svelte",
+    ".sh", ".bash", ".zsh", ".ps1",
+    ".sql",
+    ".css", ".scss", ".sass", ".less",
+    ".html", ".htm",
+    ".graphql", ".gql", ".proto",
+})
+_EXCERPT_PATH_LIMIT = 3
+_PathKind = Literal["config", "docs", "test_data", "source"]
+
+
+def _path_parts(path: str) -> list[str]:
+    return [part for part in path.replace("\\", "/").split("/") if part not in {"", "."}]
+
+
+def _basename(path: str) -> str:
+    parts = _path_parts(path)
+    return parts[-1] if parts else ""
+
+
+def _is_config_path(path: str) -> bool:
+    name = _basename(path).lower()
+    if name in _CONFIG_NAMES:
+        return True
+    if name.startswith("tsconfig") and name.endswith(".json"):
+        return True
+    return name.startswith(".eslintrc")
+
+
+def _is_docs_path(path: str) -> bool:
+    parts = _path_parts(path)
+    if not parts:
+        return False
+    if Path(parts[-1]).suffix.lower() in _DOC_SUFFIXES:
+        return True
+    return any(part.lower() == "docs" for part in parts[:-1])
+
+
+def _is_under_tests_data(path: str) -> bool:
+    parts = [part.lower() for part in _path_parts(path)]
+    for index, part in enumerate(parts[:-1]):
+        if part == "tests" and "data" in parts[index + 1 : -1]:
+            return True
+    return False
+
+
+def _path_kind(path: str) -> _PathKind:
+    """Source is everything that is not config, docs/changelog, or test data."""
+    if _is_config_path(path):
+        return "config"
+    if _is_docs_path(path):
+        return "docs"
+    suffix = Path(_basename(path)).suffix.lower()
+    if _is_under_tests_data(path) or suffix not in _CODE_SUFFIXES:
+        return "test_data"
+    return "source"
+
+
+def _unique_paths(files: Iterable[ChangedFile | str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in files:
+        path = item if isinstance(item, str) else item.path
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
+
+
+def _extend_unique(selected: list[str], seen: set[str], paths: Iterable[str]) -> None:
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        selected.append(path)
+        if len(selected) >= _EXCERPT_PATH_LIMIT:
+            return
+
+
+def _shared_of(shared: Sequence[str], overlapping: set[str], kind: _PathKind) -> list[str]:
+    chosen = [path for path in shared if _path_kind(path) == kind]
+    return [path for path in chosen if path in overlapping] + [
+        path for path in chosen if path not in overlapping
     ]
-    # No shared file: show the files the prefilter's symbol evidence names
-    # (the changed definition and its caller in the other branch).
-    paths = (paths or verifier.focus_paths(pair.symbol_evidence))[:3]
+
+
+def _excerpt_paths(
+    pair: PairRisk,
+    files_a: Iterable[ChangedFile | str],
+    files_b: Iterable[ChangedFile | str],
+) -> list[str]:
+    """Up to three diff paths, highest priority first.
+
+    Shared source (overlapping hunks first), then prefilter focus paths, then
+    config either branch changed. Docs, changelogs and test data are included
+    only when none of those exist.
+    """
+    paths_a = _unique_paths(files_a)
+    paths_b = _unique_paths(files_b)
+    in_b = set(paths_b)
+    shared = [path for path in paths_a if path in in_b]
+    overlapping = {col.path for col in pair.collisions if col.overlapping}
+
+    selected: list[str] = []
+    seen: set[str] = set()
+    _extend_unique(selected, seen, _shared_of(shared, overlapping, "source"))
+    if len(selected) < _EXCERPT_PATH_LIMIT:
+        _extend_unique(selected, seen, verifier.focus_paths(pair.symbol_evidence))
+    if len(selected) < _EXCERPT_PATH_LIMIT:
+        either = _unique_paths([*paths_a, *paths_b])
+        _extend_unique(
+            selected, seen, [path for path in either if _path_kind(path) == "config"]
+        )
+    if not selected:
+        fallback = _shared_of(shared, overlapping, "docs") + _shared_of(
+            shared, overlapping, "test_data"
+        )
+        _extend_unique(selected, seen, fallback)
+        if len(selected) < _EXCERPT_PATH_LIMIT:
+            either = _unique_paths([*paths_a, *paths_b])
+            _extend_unique(
+                selected,
+                seen,
+                [path for path in either if _path_kind(path) in {"docs", "test_data"}],
+            )
+    return selected
+
+
+def _excerpt(
+    repo: Path,
+    base_branch: str,
+    pair: PairRisk,
+    files_a: Iterable[ChangedFile | str],
+    files_b: Iterable[ChangedFile | str],
+) -> str:
+    paths = _excerpt_paths(pair, files_a, files_b)
     chunks: list[str] = []
     try:
         snippets = prefilter.evidence_snippets(repo, base_branch, pair.symbol_evidence)
@@ -322,7 +479,7 @@ def _refine_one(
             diff_b=diff_b,
             commits_a=_commits(repo, pair.branch_a),
             commits_b=_commits(repo, pair.branch_b),
-            excerpt=_excerpt(repo, base_branch, pair),
+            excerpt=_excerpt(repo, base_branch, pair, diff_a.files, diff_b.files),
             docs=docs_lookup.format_docs_section(snippets),
         )
         reply = nemotron.complete(prompt)
@@ -584,8 +741,8 @@ def analyze(
         if focus is None or focus in (a, b):
             pairs.append(_score_pair(diff_by_branch[a], diff_by_branch[b]))
     pairs.sort(key=lambda p: p.score, reverse=True)
-    # Git's own merge. Not an input to build_pair_prompt, so the LLM cache key
-    # (SHAs + prompt version) stays valid. The blend reads it after the model.
+    # Shown in the risk prompt. Cache key stays SHAs + prompt version because
+    # merge-tree is fixed by those SHAs; the blend reads it after the model.
     pairs = [
         p.model_copy(
             update={"textual_conflict": git_service.textual_conflict(repo, p.branch_a, p.branch_b)}

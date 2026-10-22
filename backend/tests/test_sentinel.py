@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
-from app.schemas import BranchDiff, BranchTests, PairRisk, Verification
+from app.schemas import BranchDiff, BranchTests, ChangedFile, FileCollision, PairRisk, Verification
 from app.services import sentinel
 from app.services.nemotron import build_pair_prompt
 
@@ -142,22 +142,189 @@ def test_real_conflict_keeps_the_floor(repo: Path, monkeypatch: pytest.MonkeyPat
     assert pair.finding == "textual_conflict"
 
 
-def test_textual_conflict_does_not_change_the_prompt() -> None:
+def _line_after(text: str, prefix: str) -> str:
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            return lines[index + 1]
+    raise AssertionError(f"no line starts with {prefix!r}")
+
+
+def _prompt_for(textual_conflict: bool | None, rationale: str, **extra: object) -> str:
     diff_a = BranchDiff(branch="a", base="main", merge_base="x", ahead=1, files=[])
     diff_b = BranchDiff(branch="b", base="main", merge_base="x", ahead=1, files=[])
-    shared = dict(
-        branch_a="a", branch_b="b", score=47.5, level="medium", rationale="overlap",
+    pair = PairRisk(
+        branch_a="a", branch_b="b", score=47.5, level="medium", rationale=rationale,
         shared_files=1, overlapping_files=1, collisions=[], git_score=47.5,
-        git_rationale="overlap",
+        git_rationale=rationale, textual_conflict=textual_conflict, **extra,
     )
-    kwargs = dict(
-        base_branch="main", diff_a=diff_a, diff_b=diff_b,
+    return build_pair_prompt(
+        base_branch="main", pair=pair, diff_a=diff_a, diff_b=diff_b,
         commits_a=["a edits top"], commits_b=["b edits top"], excerpt="diff",
     )
-    clean = build_pair_prompt(pair=PairRisk(**shared, textual_conflict=False, finding="none"), **kwargs)
-    unknown = build_pair_prompt(pair=PairRisk(**shared, textual_conflict=None), **kwargs)
-    conflict = build_pair_prompt(
-        pair=PairRisk(**shared, textual_conflict=True, finding="textual_conflict"), **kwargs
+
+
+def test_prompt_states_git_merge_tree_result() -> None:
+    likely = (
+        "1 file(s) changed in overlapping regions by both branches — "
+        "a textual merge conflict is likely."
     )
-    assert clean == unknown == conflict
-    assert "textual_conflict" not in clean
+    clean = _prompt_for(False, likely, finding="none")
+    unknown = _prompt_for(None, likely)
+    conflict = _prompt_for(True, likely, finding="textual_conflict")
+
+    assert _line_after(clean, "Git heuristic") == "Git merge (git merge-tree): merges cleanly"
+    assert _line_after(unknown, "Git heuristic") == "Git merge (git merge-tree): unknown"
+    assert _line_after(conflict, "Git heuristic") == (
+        "Git merge (git merge-tree): reports a TEXTUAL CONFLICT "
+        "(reported separately; score only semantic effects)"
+    )
+    # The merge line sits between the heuristic and the rationale.
+    assert _line_after(clean, "Git merge (git merge-tree):").startswith("Git rationale:")
+    assert _line_after(unknown, "Git merge (git merge-tree):") == f"Git rationale: {likely}"
+    assert _line_after(conflict, "Git merge (git merge-tree):") == f"Git rationale: {likely}"
+
+
+def test_clean_merge_replaces_conflict_likely_rationale() -> None:
+    likely = (
+        "1 file(s) changed in overlapping regions by both branches — "
+        "a textual merge conflict is likely."
+    )
+    calm = (
+        "1 shared file(s) but no overlapping regions — "
+        "merges cleanly today, but coordinate before divergence grows."
+    )
+    clean = _prompt_for(False, likely)
+    assert _line_after(clean, "Git merge (git merge-tree):") == (
+        "Git rationale: Hunks are close together, but git merges them cleanly."
+    )
+    assert "conflict is likely" not in clean
+
+    kept = _prompt_for(False, calm)
+    assert "Git merge (git merge-tree): merges cleanly" in kept
+    assert f"Git rationale: {calm}" in kept
+    assert "Hunks are close together" not in kept
+
+
+def _risk(**kwargs: object) -> PairRisk:
+    data: dict = dict(
+        branch_a="a", branch_b="b", score=10, level="low",
+        shared_files=0, overlapping_files=0, collisions=[], rationale="r",
+    )
+    data.update(kwargs)
+    return PairRisk(**data)
+
+
+def _collision(path: str, overlapping: bool) -> FileCollision:
+    return FileCollision(
+        path=path, overlapping=overlapping,
+        branch_a_hunks=[(1, 2)], branch_b_hunks=[(1, 2)],
+    )
+
+
+def test_excerpt_paths_shared_source_beats_changelog() -> None:
+    pair = _risk(
+        shared_files=3, overlapping_files=1,
+        collisions=[
+            _collision("lib.py", False),
+            _collision("app.py", True),
+            _collision("CHANGES.md", False),
+        ],
+    )
+    files_a = [
+        ChangedFile(path="lib.py", added_lines=1, removed_lines=0, hunks=[(10, 12)]),
+        "CHANGES.md",
+        ChangedFile(path="app.py", added_lines=1, removed_lines=0, hunks=[(1, 2)]),
+        "README.rst",
+    ]
+    files_b = ["lib.py", "CHANGES.md", "app.py", "docs/guide.txt"]
+    assert sentinel._excerpt_paths(pair, files_a, files_b) == ["app.py", "lib.py"]
+
+
+def test_excerpt_paths_includes_config_only_one_branch_changed() -> None:
+    pair = _risk(shared_files=1, collisions=[_collision("CHANGES.md", False)])
+    got = sentinel._excerpt_paths(pair, ["CHANGES.md"], ["CHANGES.md", "pyproject.toml"])
+    assert got == ["pyproject.toml"]
+
+
+def test_excerpt_paths_docs_last_only_when_nothing_else() -> None:
+    pair = _risk(
+        shared_files=3,
+        collisions=[
+            _collision("CHANGES.md", True),
+            _collision("docs/guide.py", False),
+            _collision("tests/data/fixture.json", False),
+        ],
+    )
+    files = ["tests/data/fixture.json", "CHANGES.md", "docs/guide.py"]
+    assert sentinel._excerpt_paths(pair, files, files) == [
+        "CHANGES.md", "docs/guide.py", "tests/data/fixture.json",
+    ]
+
+    # A real source file, a focus path, or a config file drops the docs.
+    with_source = sentinel._excerpt_paths(
+        pair, [*files, "src/app.py"], [*files, "src/app.py"],
+    )
+    assert with_source == ["src/app.py"]
+
+
+def test_excerpt_paths_focus_before_config_and_caps_at_three() -> None:
+    pair = _risk(
+        shared_files=1, overlapping_files=1,
+        collisions=[_collision("src/app.py", True)],
+        symbol_evidence=["parse: changed by a (src/app.py), called by b (src/caller.py)"],
+    )
+    got = sentinel._excerpt_paths(
+        pair,
+        ["src/app.py", "CHANGES.md"],
+        ["src/app.py", "CHANGES.md", "pyproject.toml", "setup.cfg", "tox.ini"],
+    )
+    assert got == ["src/app.py", "src/caller.py", "pyproject.toml"]
+
+
+def test_excerpt_paths_non_code_and_test_data_rank_with_docs() -> None:
+    pair = _risk(
+        shared_files=4,
+        collisions=[
+            _collision("src/app.py", False),
+            _collision("tests/data/sample.py", True),
+            _collision("locales/en.json", False),
+            _collision("README.md", False),
+        ],
+    )
+    files = ["README.md", "locales/en.json", "tests/data/sample.py", "src/app.py"]
+    assert sentinel._excerpt_paths(pair, files, files) == ["src/app.py"]
+
+    pair = _risk(
+        shared_files=3,
+        collisions=[
+            _collision("README.md", False),
+            _collision("locales/en.json", False),
+            _collision("tests/data/sample.py", True),
+        ],
+    )
+    files = ["locales/en.json", "README.md", "tests/data/sample.py"]
+    assert sentinel._excerpt_paths(pair, files, files) == [
+        "README.md", "tests/data/sample.py", "locales/en.json",
+    ]
+
+
+@pytest.mark.parametrize("path", [
+    "pyproject.toml",
+    "setup.cfg",
+    "tox.ini",
+    ".flake8",
+    "ruff.toml",
+    ".ruff.toml",
+    "mypy.ini",
+    ".pre-commit-config.yaml",
+    "frontend/package.json",
+    "tsconfig.json",
+    "web/tsconfig.app.json",
+    ".eslintrc",
+    "pkg/.eslintrc.cjs",
+    "biome.json",
+])
+def test_excerpt_paths_counts_tooling_files_as_config(path: str) -> None:
+    pair = _risk(shared_files=1, collisions=[_collision("CHANGES.md", False)])
+    assert sentinel._excerpt_paths(pair, ["CHANGES.md"], ["CHANGES.md", path]) == [path]
