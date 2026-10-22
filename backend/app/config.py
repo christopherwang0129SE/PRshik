@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -97,6 +98,12 @@ class Settings(BaseSettings):
     default_base_branch: str = "main"
     # Where cloned demo repos are cached.
     workspace_dir: str = ".workspace"
+
+    # Test argv is configured by the server operator, never by an API caller.
+    resolver_test_command: list[str] = []
+    resolver_test_timeout: int = Field(60, ge=1, le=600)
+    resolver_max_file_bytes: int = Field(100_000, ge=1)
+    resolver_max_conflicts: int = Field(20, ge=1)
 
     @property
     def nebius_ready(self) -> bool:
