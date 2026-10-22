@@ -275,6 +275,9 @@ def test_risk_prompt_scores_semantic_breakage_only() -> None:
     assert "[tool.black]" in SYSTEM_PROMPT
     assert "[tool.ruff]" in SYSTEM_PROMPT
     assert "dependency versions" in lowered
+    assert "mechanically rewrites existing code to satisfy it" in SYSTEM_PROMPT
+    assert "formatter/linter CI job" in SYSTEM_PROMPT
+    assert "this can be high" in lowered
     assert "recursion" in lowered
     assert "parameters only" in lowered
     assert "will fail" in lowered
@@ -422,4 +425,100 @@ def test_empty_static_section_says_only_parameters_were_compared() -> None:
     assert "Static signature checks (exact, parameters only):" in prompt
     assert "return values and behaviour were NOT checked" in prompt
     assert "PARAMETERS only" in SYSTEM_PROMPT
-    assert cache.PROMPT_VERSION == "risk-v10"
+    assert cache.PROMPT_VERSION == "risk-v11"
+
+
+def _changed(path: str):
+    from app.schemas import ChangedFile
+
+    return ChangedFile(path=path, added_lines=1, removed_lines=0, hunks=[(1, 1)])
+
+
+def _prompt_for_files(files_a: list, files_b: list) -> str:
+    from app.schemas import BranchDiff, PairRisk
+    from app.services.nemotron import build_pair_prompt
+
+    diff_a = BranchDiff(branch="a", base="main", merge_base="x", ahead=1, files=files_a)
+    diff_b = BranchDiff(branch="b", base="main", merge_base="x", ahead=1, files=files_b)
+    pair = PairRisk(
+        branch_a="feat-a", branch_b="feat-b", score=0.0, level="none", rationale="r",
+        shared_files=0, overlapping_files=0, collisions=[],
+    )
+    return build_pair_prompt(
+        base_branch="main", pair=pair, diff_a=diff_a, diff_b=diff_b,
+        commits_a=[], commits_b=[], excerpt="",
+    )
+
+
+def _config_lines(prompt: str) -> list[str]:
+    return [line for line in prompt.splitlines() if line.startswith("Config changed:")]
+
+
+def test_system_prompt_states_the_mechanical_rewrite_rule() -> None:
+    """A same-branch rewrite shows the new setting; the other branch's new code can be high."""
+    from app.services.nemotron import SYSTEM_PROMPT
+
+    rule = (
+        "When a branch changes such a setting AND, in the same branch, mechanically "
+        "rewrites existing code to satisfy it (reformatted strings, removed or added "
+        "parentheses, renamed imports, added annotations), that rewrite shows what "
+        "the new rule enforces. Code that the OTHER branch adds or edits was not "
+        "rewritten and will fail the same check once both land (for example a "
+        "formatter/linter CI job). Name the setting and the other branch's new "
+        "line; this can be high."
+    )
+    assert "That can be a real break. " + rule in SYSTEM_PROMPT
+    assert "this can be high. Behaviour interactions count:" in SYSTEM_PROMPT
+
+
+def test_prompt_lists_config_each_branch_changed() -> None:
+    """Config paths follow the git merge line, at most three per branch."""
+    prompt = _prompt_for_files(
+        [
+            _changed("src/app.py"),
+            _changed("pyproject.toml"),
+            _changed("CHANGES.md"),
+            _changed("pyproject.toml"),
+            _changed("setup.cfg"),
+            _changed("tox.ini"),
+            _changed(".flake8"),
+            _changed("tsconfig.json.bak"),
+        ],
+        [
+            _changed("src/app.py"),
+            _changed("web/tsconfig.app.json"),
+            _changed("pkg/.eslintrc.cjs"),
+            _changed("frontend/package.json"),
+            _changed("biome.json"),
+        ],
+    )
+    lines = prompt.splitlines()
+    merge_at = next(i for i, line in enumerate(lines) if line.startswith("Git merge"))
+    assert lines[merge_at + 1] == "Config changed: feat-a: pyproject.toml, setup.cfg, tox.ini"
+    assert lines[merge_at + 2] == (
+        "Config changed: feat-b: web/tsconfig.app.json, pkg/.eslintrc.cjs, frontend/package.json"
+    )
+    assert lines[merge_at + 3].startswith("Git rationale:")
+    assert ".flake8" not in _config_lines(prompt)[0]
+    assert "biome.json" not in _config_lines(prompt)[1]
+
+    only_b = _prompt_for_files(
+        [_changed("src/lib.py"), _changed("docs/guide.md")],
+        [_changed("ruff.toml")],
+    )
+    only_lines = only_b.splitlines()
+    only_at = next(i for i, line in enumerate(only_lines) if line.startswith("Git merge"))
+    assert only_lines[only_at + 1] == "Config changed: feat-b: ruff.toml"
+    assert only_lines[only_at + 2].startswith("Git rationale:")
+    assert _config_lines(only_b) == ["Config changed: feat-b: ruff.toml"]
+
+
+def test_prompt_omits_config_line_when_neither_branch_changes_config() -> None:
+    prompt = _prompt_for_files(
+        [_changed("src/app.py"), _changed("CHANGES.md"), _changed("tests/data/fixture.json")],
+        [_changed("README.md"), _changed("mypy.ini.bak"), _changed("notes/eslintrc.json")],
+    )
+    lines = prompt.splitlines()
+    merge_at = next(i for i, line in enumerate(lines) if line.startswith("Git merge"))
+    assert lines[merge_at + 1].startswith("Git rationale:")
+    assert "Config changed:" not in prompt

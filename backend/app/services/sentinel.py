@@ -77,6 +77,7 @@ from app.services import (
     prefilter,
     verifier,
 )
+from app.services.config_paths import is_config_path as _is_config_path
 from app.services.nemotron import (
     NemotronError,
     build_pair_prompt,
@@ -202,19 +203,6 @@ def _commits(repo: Path, branch: str) -> list[str]:
         return []
 
 
-# Tooling files. Match the basename; ``tsconfig*.json`` and ``.eslintrc*`` are prefixes.
-_CONFIG_NAMES = frozenset({
-    "pyproject.toml",
-    "setup.cfg",
-    "tox.ini",
-    ".flake8",
-    "ruff.toml",
-    ".ruff.toml",
-    "mypy.ini",
-    ".pre-commit-config.yaml",
-    "package.json",
-    "biome.json",
-})
 _DOC_SUFFIXES = frozenset({".md", ".rst", ".txt"})
 # A path with none of these suffixes is non-code, so it counts as test data
 # unless it is config or docs. ``tests/**/data/`` is test data even when the
@@ -246,15 +234,6 @@ def _path_parts(path: str) -> list[str]:
 def _basename(path: str) -> str:
     parts = _path_parts(path)
     return parts[-1] if parts else ""
-
-
-def _is_config_path(path: str) -> bool:
-    name = _basename(path).lower()
-    if name in _CONFIG_NAMES:
-        return True
-    if name.startswith("tsconfig") and name.endswith(".json"):
-        return True
-    return name.startswith(".eslintrc")
 
 
 def _is_docs_path(path: str) -> bool:

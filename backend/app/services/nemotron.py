@@ -20,6 +20,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.schemas import BranchDiff, ChangedFile, FileCollision, PairRisk, RiskLevel
+from app.services.config_paths import is_config_path
 
 # Prompt budget. Excerpts are dropped before the structured summary is cut.
 MAX_PROMPT_CHARS = 9000
@@ -52,6 +53,13 @@ SYSTEM_PROMPT = (
     "mypy, pytest options, or dependency versions), check whether code added by "
     "the other branch would violate or be affected by the new setting. That can "
     "be a real break. "
+    "When a branch changes such a setting AND, in the same branch, mechanically "
+    "rewrites existing code to satisfy it (reformatted strings, removed or added "
+    "parentheses, renamed imports, added annotations), that rewrite shows what "
+    "the new rule enforces. Code that the OTHER branch adds or edits was not "
+    "rewritten and will fail the same check once both land (for example a "
+    "formatter/linter CI job). Name the setting and the other branch's new "
+    "line; this can be high. "
     "Behaviour interactions count: one branch changes how a function or class "
     "behaves (recursion, ordering, wrapping or unwrapping, caching, defaults) "
     "and the other adds callers, inputs or features that hit the changed path. "
@@ -341,6 +349,29 @@ def _collision_lines(pair: PairRisk) -> list[str]:
     return lines
 
 
+_MAX_CONFIG_PATHS = 3
+
+
+def _config_changed_line(branch: str, files: list[ChangedFile]) -> str | None:
+    """One ``Config changed`` line, or None when this branch touched no tooling file.
+
+    At most three paths, in the order the branch changed them.
+    """
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in files:
+        path = item.path
+        if not path or path in seen or not is_config_path(path):
+            continue
+        seen.add(path)
+        paths.append(path)
+        if len(paths) >= _MAX_CONFIG_PATHS:
+            break
+    if not paths:
+        return None
+    return f"Config changed: {branch}: {', '.join(paths)}"
+
+
 def _git_merge_line(pair: PairRisk) -> str:
     if pair.textual_conflict is True:
         return (
@@ -383,6 +414,14 @@ def build_pair_prompt(
             f"overlapping_files={pair.overlapping_files}"
         ),
         _git_merge_line(pair),
+        *[
+            line
+            for line in (
+                _config_changed_line(pair.branch_a, diff_a.files),
+                _config_changed_line(pair.branch_b, diff_b.files),
+            )
+            if line
+        ],
         f"Git rationale: {_prompt_git_rationale(pair)}",
         (
             "Static prefilter: symbols one branch changes that the other changes or calls: "
