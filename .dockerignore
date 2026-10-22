@@ -1,0 +1,22 @@
+# Keep keys and local environments out of the build context.
+.env
+**/.env
+backend/.env
+.venv
+backend/.venv
+**/.venv
+node_modules
+frontend/node_modules
+**/node_modules
+.workspace
+**/.workspace
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.git
+frontend
+# Regenerated in the image by demo/make_*_demo_repo.py.
+demo/checkout-demo
+demo/api-demo
+demo/real-case-1
+demo/harmless-demo
