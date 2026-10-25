@@ -517,7 +517,7 @@ function App() {
                 />
               ) : (
                 <p className="detail-empty">
-                  {loading ? 'Pairs appear here as Nemotron scores them.' : 'Choose a pair to see the evidence.'}
+                  {loading ? 'Pairs appear here as Nemotron scores them.' : pairs.length === 0 ? 'Analyze a repository with at least two branches besides the base to see pair evidence.' : 'Choose a pair to see the evidence.'}
                 </p>
               )}
             </div>
