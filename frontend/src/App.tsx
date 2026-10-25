@@ -14,6 +14,10 @@ import { PairIndex } from './components/PairIndex';
 import { PairDetail } from './components/PairDetail';
 import { RunSummary } from './components/RunSummary';
 import { ErrorPanel } from './components/ErrorPanel';
+import { clearPairDiffCache } from './services/pairDiffCache';
+import { RepositoryBrowser } from './components/RepositoryBrowser';
+import { readHistory, storeHistory } from './services/history';
+import type { SavedRun } from './services/history';
 import './App.css';
 
 // Demo repo paths, injected by Vite (see vite.config.ts `define`).
@@ -36,6 +40,10 @@ const isAbort = (err: unknown): boolean =>
 const STACKED = '(max-width: 959px)';
 
 function App() {
+  const [history, setHistory] = useState<SavedRun[]>(readHistory);
+  const historyRef = useRef(history);
+  const [historyWarning, setHistoryWarning] = useState('');
+  const [restoredAt, setRestoredAt] = useState<string | null>(null);
   const [repoInput, setRepoInput] = useState('');
   const [baseBranch, setBaseBranch] = useState('main');
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -131,6 +139,8 @@ function App() {
     abortRef.current = controller;
 
     const nextTarget: Target = { repo: repo.trim(), base: baseName, source: repoField };
+    clearPairDiffCache();
+    setRestoredAt(null);
     setTarget(nextTarget);
     setFieldError(null);
     setError(null);
@@ -172,6 +182,13 @@ function App() {
         result = await analyzeRepo(request, controller.signal);
       }
       if (id !== requestId.current) return;
+      const saved: SavedRun = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...nextTarget, result };
+      const nextHistory = [saved, ...historyRef.current].slice(0, 12);
+      historyRef.current = nextHistory;
+      setHistory(nextHistory);
+      if (!storeHistory(nextHistory)) {
+        setHistoryWarning('Browser storage is unavailable or full. History is kept for this session only.');
+      }
       setResponse(result);
       setRun((r) => finishRun(r, result));
       const ranked = rankPairs(result.pairs);
@@ -258,6 +275,26 @@ function App() {
     runAnalysis(path, 'main');
   };
 
+  const restoreRun = (saved: SavedRun) => {
+    ++requestId.current;
+    clearPairDiffCache();
+    const chosen = rankPairs(saved.result.pairs)[0];
+    const key = chosen ? pairKey(chosen) : null;
+    setRepoInput(saved.repo);
+    setBaseBranch(saved.base);
+    setTarget({ repo: saved.repo, base: saved.base, source: saved.source });
+    setResponse(saved.result);
+    setRun(finishRun(initialRun(), saved.result));
+    setSelectedKey(key);
+    setError(null);
+    setPhase('done');
+    setElapsed(saved.result.usage?.elapsed_s ?? 0);
+    setRestoredAt(saved.createdAt);
+    writeHash(saved, key);
+    requestAnimationFrame(() => summaryRef.current?.focus({ preventScroll: true }));
+    setAnnouncement('Saved analysis opened. Run Analyze for a fresh verdict.');
+  };
+
   const backendOffline = healthChecked && !health;
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
   const pairs = response?.pairs ?? run.pairs;
@@ -265,7 +302,7 @@ function App() {
   const pending = loading ? Math.max(0, (run.branches.length * (run.branches.length - 1)) / 2 - run.pairs.length) : 0;
   const showWorkspace = target && (response || (loading && (run.pairs.length > 0 || run.branches.length > 1)));
   const pipelineMode = phase === 'idle' ? 'idle' : loading ? (streamed ? 'live' : 'blind') : 'finished';
-  const showPipeline = phase === 'idle' || loading || (streamed && phase !== 'error');
+  const showPipeline = !restoredAt && (phase === 'idle' || loading || (streamed && phase !== 'error'));
 
   return (
     <div className="app">
@@ -399,6 +436,32 @@ function App() {
           )}
         </section>
 
+        <RepositoryBrowser disabled={loading} onAnalyze={(repo, base) => {
+          wantedPair.current = null;
+          setRepoInput(repo); setBaseBranch(base); runAnalysis(repo, base);
+        }} />
+        <section className="library" aria-label="Analysis history">
+          <details>
+            <summary>Analysis history <span className="tabular">({history.length})</span></summary>
+            <div className="library-body">
+              <p>The last 12 completed analyses are saved in this browser. Failed and cancelled runs are excluded.</p>
+              {historyWarning && <p role="status">{historyWarning}</p>}
+              {history.length === 0 ? <p>No completed analyses yet. Choose a demo or analyze a repository.</p> : <>
+                <ul className="library-list">{history.map((saved) => <li key={saved.id}>
+                  <div><strong>{saved.repo}</strong><p><time dateTime={saved.createdAt}>{new Date(saved.createdAt).toLocaleString()}</time> · {saved.base}</p><p>{summaryLine(saved.result.pairs)}</p></div>
+                  <button className="btn" disabled={loading} onClick={() => restoreRun(saved)}>Open saved analysis</button>
+                </li>)}</ul>
+                <button className="btn" onClick={() => {
+                  historyRef.current = [];
+                  setHistory([]);
+                  setHistoryWarning(storeHistory([]) ? '' : 'Could not clear browser storage. History may return after reload.');
+                }}>Clear history</button>
+              </>}
+            </div>
+          </details>
+        </section>
+        {restoredAt && <p className="notice" role="status">Saved verdict from {new Date(restoredAt).toLocaleString()}. Diffs load from the repository as it is now. Run Analyze to check current branch heads.</p>}
+
         <p className="sr-only" role="status" aria-live="polite">
           {announcement}
         </p>
@@ -444,7 +507,7 @@ function App() {
             <div className="workspace-detail">
               {selected ? (
                 <PairDetail
-                  key={pairKey(selected)}
+                  key={`${requestId.current}:${pairKey(selected)}`}
                   pair={selected}
                   source={target.source}
                   baseBranch={response?.base_branch ?? run.baseBranch ?? target.base}

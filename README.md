@@ -725,3 +725,25 @@ docs/               customer discovery + notes
 
 Something is always on guard at the merge point — watching every in-flight
 branch so a conflict never lands as a surprise.
+
+### Repository browser and analysis history
+
+The dashboard's **Repositories & pull requests** panel reads bundled repositories
+and their real branch names from `GET /api/repositories`. Generate both demo repos
+using the commands in [demo/README.md](demo/README.md) before starting the backend.
+The GitHub queue reads `GET /api/github/pulls?repository=owner/repo&base_branch=main`;
+listing does not clone or analyze a repository. Choose **Analyze PR** to start a
+streamed comparison. Public repositories work without a token; private repositories
+require the existing backend `GITHUB_TOKEN`. Demo mode disables GitHub browsing.
+
+**Analysis history** keeps the last 12 completed results in this browser's local
+storage. Opening a record restores its saved verdict without a model call; its
+code diffs are fetched from current branch heads. The dated notice makes this
+clear. Use **Analyze** to check the repository again, or **Clear history** to erase
+saved records. Failed/cancelled runs are not stored. If browser storage is full or
+blocked, the dashboard reports that records will only survive for this session.
+
+For a second local stack, set `CORS_ALLOW_ORIGINS=http://127.0.0.1:3105` on the
+backend and `VITE_API_BASE_URL=http://127.0.0.1:8105` on the frontend, matching the
+ports passed to uvicorn and Vite. Fonts are self-hosted, with Azeret Mono used for
+code and tabular figures.

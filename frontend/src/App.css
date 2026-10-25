@@ -1992,3 +1992,36 @@
 .index-row[data-verdict='pending'] .row-verdict {
   color: var(--ink-2);
 }
+
+/* Repository and run records share the workspace's ruled list structure. */
+.library {
+  border-block-start: 1px solid var(--rule);
+  margin-block: var(--s4);
+}
+.library summary {
+  padding-block: var(--s4);
+  cursor: pointer;
+  font-weight: 600;
+}
+.library-body { padding-block: 0 var(--s5); }
+.library-body h2 { font-size: var(--t-lg); margin-block: var(--s4) var(--s2); }
+.library-body p { color: var(--ink-2); margin-block: var(--s2); }
+.library-list, .branch-list { list-style: none; padding: 0; }
+.library-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  border-block-end: 1px solid var(--rule);
+  padding-block: var(--s4);
+}
+.library-list > li > div { min-width: 0; overflow-wrap: anywhere; }
+.library-list .btn { flex-shrink: 0; }
+.branch-list { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); font-size: var(--t-sm); }
+.queue-form { display: flex; gap: var(--s3); align-items: end; margin-block: var(--s4); }
+.queue-form .field { flex: 1; }
+@media (max-width: 599px) {
+  .library-list > li { flex-direction: column; align-items: stretch; }
+  .queue-form { flex-direction: column; align-items: stretch; }
+}
+@media (min-width: 600px) { .queue-form .queue-base { flex: 0 1 180px; } }

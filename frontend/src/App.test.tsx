@@ -153,6 +153,7 @@ describe('App', () => {
   const calls = (suffix: string) => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(suffix));
 
   beforeEach(() => {
+    localStorage.clear();
     clearPairDiffCache();
     window.history.replaceState(null, '', '/');
     routes = {
@@ -169,6 +170,39 @@ describe('App', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.history.replaceState(null, '', '/');
+  });
+
+  it('restores browser history without rerunning the analysis and clears records', async () => {
+    localStorage.setItem('mergeguard.runs.v1', JSON.stringify([{
+      id: 'saved', createdAt: '2026-10-25T12:00:00Z', repo: '/saved/demo', base: 'main',
+      source: { repo_path: '/saved/demo' }, result: RESULT,
+    }]));
+    render(<App />);
+    fireEvent.click(screen.getByText(/Analysis history/));
+    fireEvent.click(screen.getByRole('button', { name: 'Open saved analysis' }));
+    expect(await screen.findByTestId('run-summary')).toBeInTheDocument();
+    expect(screen.getByLabelText('Repository')).toHaveValue('/saved/demo');
+    expect(screen.getByText(/Saved verdict from/)).toBeInTheDocument();
+    expect(screen.queryByTestId('pipeline')).not.toBeInTheDocument();
+    expect(calls('/api/analyze/stream')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear history' }));
+    expect(JSON.parse(localStorage.getItem('mergeguard.runs.v1')!)).toEqual([]);
+  });
+
+  it('refreshes pair diffs when a new analysis starts on the same branch names', async () => {
+    route('/api/analyze/stream', () => Promise.resolve(new Response(
+      JSON.stringify({ type: 'result', result: RESULT, t: 1 }) + '\n',
+      { headers: { 'Content-Type': 'application/x-ndjson' } },
+    )));
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Try demo repo' }));
+    await screen.findByTestId('run-summary');
+    await screen.findByText('checkout.py');
+    expect(calls('/api/pair-diff')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze', exact: true }));
+    await screen.findByTestId('run-summary');
+    await screen.findByText('checkout.py');
+    expect(calls('/api/pair-diff')).toHaveLength(2);
   });
 
   it('opens on the form, both demos and how a run works', async () => {

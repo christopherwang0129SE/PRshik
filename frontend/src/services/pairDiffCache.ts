@@ -1,7 +1,7 @@
 import type { PairDiffResponse } from '../types';
 
-// Diffs only change when the branches do; keep them for the session.
+// Reuse pair diffs within a run; App clears them when starting or restoring a run.
 export const pairDiffCache = new Map<string, PairDiffResponse>();
 
-/** Test hook: forget cached diffs between tests. */
+/** Forget branch-head-dependent diffs before another analysis. */
 export const clearPairDiffCache = () => pairDiffCache.clear();
