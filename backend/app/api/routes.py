@@ -233,6 +233,38 @@ def health() -> dict:
     }
 
 
+@router.get("/repositories")
+def repositories() -> dict:
+    """Discover bundled repositories without starting an analysis."""
+    items = []
+    for repo in bundled_demo_repos():
+        available = (repo / ".git").exists()
+        try:
+            branches = git_service.list_branches(repo, exclude=settings.default_base_branch) if available else []
+        except git_service.GitError as exc:
+            raise HTTPException(400, _safe_detail(exc)) from exc
+        items.append({"name": repo.name, "repo_path": str(repo),
+                      "base_branch": settings.default_base_branch,
+                      "branches": branches, "available": available})
+    return {"repositories": items}
+
+
+@router.get("/github/pulls")
+def github_pulls(repository: str = "", base_branch: str = "main") -> dict:
+    """Read the open PR queue; cloning and analysis require a separate action."""
+    if settings.demo_mode:
+        raise HTTPException(403, "GitHub browsing is unavailable in demo mode. Choose a bundled repository.")
+    repository = repository.strip() or settings.github_repository.strip()
+    if not repository:
+        raise HTTPException(400, "Enter a GitHub repository as owner/repo.")
+    try:
+        repository = github_service.validate_repository(repository)
+        pulls = github_service.list_open_pulls(repository, base_branch, token=_token(), limit=30)
+    except github_service.GitHubError as exc:
+        raise HTTPException(400, _safe_detail(exc)) from exc
+    return {"repository": repository, "pull_requests": pulls}
+
+
 @router.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     opened, branches = _prepare(req)
