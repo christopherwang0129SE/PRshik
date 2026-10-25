@@ -1,4 +1,4 @@
-"""CORS origin parsing and the DEMO_MODE lock on POST /api/analyze."""
+"""CORS origin parsing and the DEMO_MODE lock on analyze, resolve and the GitHub routes."""
 from __future__ import annotations
 
 import re
@@ -199,3 +199,32 @@ def test_demo_mode_leaves_health_unchanged(monkeypatch: pytest.MonkeyPatch) -> N
     assert body["status"] == "ok"
     assert body["nebius_ready"] is False
     assert "nebius_api_key" not in body
+
+
+def test_demo_mode_resolve_accepts_only_bundled_repos(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "demo"
+    checkout = root / "checkout-demo"
+    _init_branch_repo(checkout)
+    monkeypatch.setattr(verifier, "DEMO_ROOT", root)
+    monkeypatch.setattr(settings, "demo_mode", True)
+    client = TestClient(app)
+    body = {"target_branch": "feat-a", "source_branch": "feat-b"}
+
+    for path in (str(repo), "/etc", str(root)):
+        response = client.post("/api/resolve", json={**body, "repo_path": path})
+        assert response.status_code == 403, path
+        assert "bundled demo" in response.json()["detail"]
+
+    allowed = client.post("/api/resolve", json={**body, "repo_path": str(checkout)})
+    assert allowed.status_code != 403
+
+
+def test_demo_mode_turns_off_github_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "github_repository", "example/repo")
+    monkeypatch.setattr(settings, "github_seated_users", "someone")
+    client = TestClient(app)
+    for route in ("/api/github/pull-requests", "/api/github/queue"):
+        assert client.get(route).status_code == 403, route

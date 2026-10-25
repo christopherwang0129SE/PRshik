@@ -44,7 +44,7 @@ The process listens on `0.0.0.0` and `${PORT:-8000}`. Railway injects `PORT`.
 | `CORS_ALLOW_ORIGIN_REGEX` | Optional. Leave empty until you want preview deployments. Example: `https://mergeguard-demo.*\.vercel\.app`. The regex must match the whole origin. |
 | `VERIFY_ALLOWED_ROOTS` | Leave unset with this image. |
 
-Leave `GITHUB_REPOSITORY`, `GITHUB_TOKEN`, and `GITHUB_SEATED_USERS` unset. The GitHub sync route is unchanged by demo mode, and it clones whatever repository those variables name.
+Leave `GITHUB_REPOSITORY`, `GITHUB_TOKEN`, and `GITHUB_SEATED_USERS` unset. With `DEMO_MODE=true` both GitHub routes return 403, and `POST /api/resolve` accepts the same two bundled repositories as analyze.
 
 CORS is read when the process starts. Change the variables, then redeploy.
 
@@ -56,10 +56,19 @@ Published Railway prices as of October 2026:
 
 | Plan | Subscription | Included usage | Caps and meter |
 | --- | --- | --- | --- |
+| Free Trial (new accounts) | $0, no card | $5 one-time, 30 days | Up to 2 vCPU and 1 GB per service. Falls back to Free afterwards. Accounts Railway cannot verify through GitHub get a Limited Trial with restricted outbound network, which can block Token Factory and Tavily calls; git-only scores and branch tests still work. |
 | Free | $0 | $1/month | Max 1 vCPU and 0.5 GB RAM per service. App sleeping. |
 | Hobby | $5/month | $5 of usage | Past the included $5: RAM $10/GB-month, CPU $20/vCPU-month, egress $0.05/GB. |
 
 Those resource rates apply on both plans. A service held at 0.5 GB around the clock is about $5 of RAM before CPU. That spends the Hobby credit on its own. It is also well above Free's $1 credit, so an always-on service does not fit Free. Sleeping is what keeps a quiet demo inside either credit. In Workspace Settings → Usage, set a hard usage limit and an email alert before the service is public. A limit of $5 matches Hobby's included usage. On Free the included credit is $1, so a higher limit is a spending-limit change and needs approval. Egress for this demo is the JSON the dashboard fetches. Tavily and Token Factory bill separately from Railway. Token Factory is prepaid: the cap is the balance on a dedicated key. Tavily draws its own free-tier credits.
+
+## Render (no-card alternative)
+
+If Railway is not wanted, `render.yaml` at the repository root describes the same API as a Render free web service. Render's free web services need no payment method. Limits: 512 MB RAM, the service sleeps after 15 minutes without inbound traffic and takes about a minute to wake, 750 free instance hours per workspace per month, and the filesystem resets on every restart, so the Nemotron cache does not survive a sleep.
+
+1. In the Render dashboard choose New, Blueprint, and select this repository and the branch that contains `render.yaml`. Do not add a payment method.
+2. Fill `CORS_ALLOW_ORIGINS` with the Vercel origin. Leave `NEBIUS_API_KEY` and `TAVILY_API_KEY` empty for a git-only demo, or paste a dedicated low-balance key.
+3. The service URL looks like `https://mergeguard-demo-api.onrender.com`. That origin is `VITE_API_BASE_URL` on Vercel.
 
 ## Vercel
 
