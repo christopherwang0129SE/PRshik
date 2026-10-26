@@ -2,6 +2,16 @@
 
 MergeGuard catches branches that merge cleanly in Git but break together. Sentinel compares in-flight branches, uses NVIDIA Nemotron 3 Super on Nebius Token Factory to explain semantic risk, and checks the merged result with branch tests and generated intent tests. The dashboard and MCP tools return the risky pair and its test evidence. Built for the Nebius x NVIDIA hackathon; Tavily grounds model prompts with library documentation.
 
+## Hosted demo: git-only
+
+The hosted demo ([mergeguard-demo.onrender.com](https://mergeguard-demo.onrender.com)) and a default install run without a Nebius Token Factory key. `/api/health` reports `nebius_ready: false` and `tavily_ready: false`.
+
+What still works: git scoring from hunk overlap, each branch's own tests on the merged result, and the checkout regression proof (the merged total is 200 instead of 198).
+
+What needs `NEBIUS_API_KEY`: Nemotron risk refinement, generated intent tests, the resolver, and Tavily library-doc lookup. Tavily also needs `TAVILY_API_KEY`, and it stays off when the model path is off.
+
+To enable that path locally, copy `.env.example` to `backend/.env`, set `NEBIUS_API_KEY`, and optionally `TAVILY_API_KEY`. Restart the API. Never commit the key. The Nebius and Nemotron sections below are the reference for this optional path.
+
 ## Public hosting on Render (free)
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard/tree/hosting-setup)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { activeStage, finishRun, formatClock, formatDuration, initialRun, reduceRun } from './run';
+import { activeStage, finishRun, formatClock, formatDuration, initialRun, reduceRun, stagesFor } from './run';
 import type { AnalyzeResponse, PairRisk, StreamEvent } from '../types';
 
 const pair = (a: string, b: string, score: number): PairRisk => ({
@@ -60,6 +60,25 @@ describe('reduceRun', () => {
     expect(run.pairs[0].score).toBe(90);
     expect(run.stages.branch_tests).toMatchObject({ state: 'done', endedAt: 9 });
     expect(finishRun(initialRun(), result).baseBranch).toBe('main');
+  });
+});
+
+describe('stagesFor', () => {
+  it('keeps the Nemotron step when the model is ready', () => {
+    const model = stagesFor(false).find((stage) => stage.id === 'model');
+    expect(model?.title).toBe('Nemotron');
+    expect(model?.about).toMatch(/Nemotron reads both diffs/);
+  });
+
+  it('does not claim Nemotron will score in git-only mode', () => {
+    const stages = stagesFor(true);
+    expect(stages.find((stage) => stage.id === 'model')).toMatchObject({
+      title: 'Git score',
+      about: 'Risk comes from git hunk overlap. Nemotron needs a Nebius key; not enabled in this demo.',
+    });
+    expect(stages.find((stage) => stage.id === 'verify')?.about).toBe(
+      'Intent test generation needs a Nebius key; not enabled in this demo. Branch tests still run.'
+    );
   });
 });
 

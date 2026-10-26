@@ -133,6 +133,25 @@
   outline: none;
 }
 
+/* Status fact for a keyless demo. Ink bar matches the pipeline, not a warning. */
+.mode-note {
+  max-width: 68ch;
+  margin: 0 0 var(--s5);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mode-note strong {
+  font-weight: 650;
+}
+
 .footer {
   border-top: 1px solid var(--rule);
   padding-block: var(--s5);

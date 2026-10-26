@@ -11,6 +11,7 @@ import { VerificationDetails } from './VerificationDetails';
 import { BranchTestDetails } from './BranchTestDetails';
 import { DocsSources } from './DocsSources';
 import { advancedView } from '../utils/presentation';
+import { NEEDS_NEBIUS_KEY } from '../utils/agent';
 
 interface PairDetailProps {
   pair: PairRisk;
@@ -20,6 +21,8 @@ interface PairDetailProps {
   /** True while the stream may still update this pair. */
   provisional?: boolean;
   headingRef?: Ref<HTMLHeadingElement>;
+  /** Health says the model is off. Model-only actions explain that instead of failing. */
+  gitOnly?: boolean;
 }
 
 const VERDICT_LINE: Record<ReturnType<typeof pairVerdict>, string> = {
@@ -30,7 +33,7 @@ const VERDICT_LINE: Record<ReturnType<typeof pairVerdict>, string> = {
 };
 
 const FALLBACK_TEXT: Record<string, string> = {
-  no_api_key: 'no Nebius API key on the backend',
+  no_api_key: NEEDS_NEBIUS_KEY,
   disabled: 'Nemotron is turned off',
   prefiltered: 'the branches share no files or functions',
   pair_cap: 'more pairs than the per-run model limit',
@@ -156,7 +159,7 @@ const Cost = ({ pair, usage }: { pair: PairRisk; usage?: UsageSummary | null }) 
  * One branch pair in full: verdict and score, the explanation, both diffs
  * side by side, the test evidence, the docs Nemotron read and what it cost.
  */
-export const PairDetail = ({ pair, source, baseBranch, usage, provisional = false, headingRef }: PairDetailProps) => {
+export const PairDetail = ({ pair, source, baseBranch, usage, provisional = false, headingRef, gitOnly = false }: PairDetailProps) => {
   const verdict = pairVerdict(pair);
   const awaitingVerdict = provisional && verdict === 'clean';
   const docs = usableDocs([...(pair.docs_sources ?? []), ...(pair.verification?.docs_sources ?? [])]);
@@ -203,9 +206,18 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         </div>
       </section>
 
-      {pair.verification && (
+      {pair.verification ? (
         <VerificationDetails verification={pair.verification} branchA={pair.branch_a} branchB={pair.branch_b} />
-      )}
+      ) : gitOnly && pair.shared_files > 0 ? (
+        <section className="block" aria-labelledby="intent-off-heading">
+          <h3 id="intent-off-heading" className="block-title">
+            Verify by test <span className="block-sub">generated intent tests</span>
+          </h3>
+          <div className="block-body">
+            <p>Intent test generation {NEEDS_NEBIUS_KEY}. Each branch&apos;s own tests still run on the merge.</p>
+          </div>
+        </section>
+      ) : null}
       {pair.branch_tests && (
         <BranchTestDetails branchTests={pair.branch_tests} branchA={pair.branch_a} branchB={pair.branch_b} />
       )}
@@ -217,6 +229,7 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
             <p>Agree on whether the discount cap applies before or after tax. Keep the cap on the pre-tax subtotal, then apply tax, if preserving the discount branch’s contract.</p>
             <p>Update the competing tax-order contract and rerun both branches’ tests together before merging.</p>
             <p className="muted">Demo guidance for human review. This dashboard has no integrated planner or resolver and has not applied a fix.</p>
+            {gitOnly && <p>The resolver {NEEDS_NEBIUS_KEY}.</p>}
           </div>
         </section>
       )}

@@ -18,3 +18,6 @@ export function sentinelMode(health: HealthResponse | null): 'git only' | 'git+N
   }
   return 'git only';
 }
+
+/** Copy for a control that would call Nemotron, Tavily, intent tests, or the resolver. */
+export const NEEDS_NEBIUS_KEY = 'needs a Nebius key; not enabled in this demo';
