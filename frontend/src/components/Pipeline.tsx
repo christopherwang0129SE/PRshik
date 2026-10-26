@@ -1,5 +1,5 @@
 import type { RunState, StageProgress } from '../utils/run';
-import { STAGES, formatClock, formatDuration } from '../utils/run';
+import { formatClock, formatDuration, skippedModelDetail, stagesFor } from '../utils/run';
 
 export type PipelineMode = 'idle' | 'live' | 'blind' | 'finished';
 
@@ -13,6 +13,8 @@ interface PipelineProps {
   mode: PipelineMode;
   elapsedS?: number;
   onCancel?: () => void;
+  /** Health says Nemotron is off. Model steps must not claim they will run. */
+  gitOnly?: boolean;
 }
 
 const stateText = (stage: StageProgress, mode: PipelineMode): string => {
@@ -35,8 +37,9 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
  * reports them. Before a run it doubles as the explanation of what will
  * happen; after a run it keeps the time each stage took.
  */
-export const Pipeline = ({ run, mode, elapsedS = 0, onCancel }: PipelineProps) => {
+export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }: PipelineProps) => {
   const running = mode === 'live' || mode === 'blind';
+  const stages = stagesFor(gitOnly);
   const content = (
     <section className="pipeline" data-mode={mode} aria-labelledby="pipeline-heading" data-testid="pipeline">
       <div className="pipeline-head">
@@ -58,9 +61,13 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel }: PipelineProps) =
         )}
       </div>
       <ol className="stages">
-        {STAGES.map((def) => {
+        {stages.map((def) => {
           const stage = run.stages[def.id];
           const text = stateText(stage, mode);
+          const detail =
+            gitOnly && stage.state === 'skipped' && (def.id === 'model' || def.id === 'verify')
+              ? skippedModelDetail(def.id, stage.detail)
+              : stage.detail;
           return (
             <li key={def.id} className="stage" data-state={stage.state} data-testid={`stage-${def.id}`}>
               <span className="stage-bar" aria-hidden="true"></span>
@@ -69,7 +76,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel }: PipelineProps) =
               {mode === 'idle' ? (
                 <span className="stage-about">{def.about}</span>
               ) : (
-                stage.detail && <span className="stage-detail">{stage.detail}</span>
+                detail && <span className="stage-detail">{detail}</span>
               )}
             </li>
           );

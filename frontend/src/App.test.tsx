@@ -244,6 +244,65 @@ describe('App', () => {
     expect(within(pipeline).getByRole('heading', { name: 'How a run works' })).toBeInTheDocument();
     expect(within(pipeline).getAllByRole('listitem')).toHaveLength(6);
     expect(await screen.findByText('Sentinel online')).toBeInTheDocument();
+    expect(screen.getByText(/asks Nemotron which pairs interact/)).toBeInTheDocument();
+    expect(screen.queryByText(/Git-only scores/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('stage-model')).toHaveTextContent('Nemotron reads both diffs');
+  });
+
+  it('shows a git-only notice and does not claim Nemotron is scoring', async () => {
+    route('/api/health', () => Promise.resolve(jsonResponse({
+      ...HEALTH,
+      nebius_ready: false,
+      nebius_enabled: true,
+      tavily_ready: false,
+    })));
+    let stream!: ReturnType<typeof controllableStream>;
+    route('/api/analyze/stream', (init) => {
+      stream = controllableStream(init?.signal);
+      return Promise.resolve(stream.response);
+    });
+    render(<App />);
+
+    const notice = await screen.findByText(/This demo runs without a Nebius Token Factory key/);
+    expect(notice).toHaveTextContent(
+      'Git-only scores. This demo runs without a Nebius Token Factory key, so Nemotron and Tavily are off. Risk comes from git hunk overlap and the branch tests still run.'
+    );
+    expect(screen.getByText(/scores pairs from git hunk overlap/)).toBeInTheDocument();
+    expect(screen.queryByText(/asks Nemotron which pairs interact/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('stage-model')).toHaveTextContent('Git score');
+    expect(screen.getByTestId('stage-model')).toHaveTextContent('Nemotron needs a Nebius key; not enabled in this demo.');
+    expect(screen.getByTestId('stage-verify')).toHaveTextContent('Intent test generation needs a Nebius key; not enabled in this demo.');
+    expect(screen.queryByText(/Nemotron reads both diffs/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Tavily lookup needs a Nebius key; not enabled in this demo/)).toBeInTheDocument();
+    expect(screen.getByText(/Using Nemotron, intent tests, the resolver, or Tavily/)).toHaveTextContent(
+      'needs a Nebius key; not enabled in this demo'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try demo repo' }));
+    await act(async () => {
+      stream.push({ type: 'branches', base_branch: 'main', branches: RESULT.branches, t: 0.3 });
+      stream.push({
+        type: 'stage',
+        stage: 'model',
+        status: 'skipped',
+        label: 'Skipped Nemotron scoring',
+        detail: 'No Nebius API key is configured',
+        t: 1,
+      });
+      stream.push({
+        type: 'stage',
+        stage: 'verify',
+        status: 'skipped',
+        label: 'Skipped intent tests',
+        detail: 'Nemotron did not score pairs, so intent tests were not run',
+        t: 1.1,
+      });
+    });
+    expect(await screen.findByText('Pairs appear here as git scores them.')).toBeInTheDocument();
+    expect(screen.queryByText('Pairs appear here as Nemotron scores them.')).not.toBeInTheDocument();
+    expect(screen.getByTestId('stage-model')).toHaveTextContent('Nemotron needs a Nebius key; not enabled in this demo.');
+    expect(screen.getByTestId('stage-model')).not.toHaveTextContent('No Nebius API key is configured');
+    expect(screen.getByTestId('stage-verify')).toHaveTextContent('Intent test generation needs a Nebius key; not enabled in this demo.');
   });
 
   it('streams the run: stages light up, pairs appear, then the summary leads', async () => {

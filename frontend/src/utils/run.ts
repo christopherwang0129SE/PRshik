@@ -1,4 +1,5 @@
 import type { AnalyzeResponse, PairRisk, StageId, StageStatus, StreamEvent } from '../types';
+import { NEEDS_NEBIUS_KEY } from './agent';
 
 export interface StageDef {
   id: StageId;
@@ -16,6 +17,38 @@ export const STAGES: StageDef[] = [
   { id: 'verify', title: 'Verify by test', about: 'Nemotron writes a test of both intents and runs it on A, B, base and the merge.' },
   { id: 'branch_tests', title: 'Branch tests', about: "Each branch's own tests run on the merge. No LLM." },
 ];
+
+/**
+ * Idle-stage copy. In git-only mode the model steps must not claim Nemotron
+ * is about to score or write tests.
+ */
+export const stagesFor = (gitOnly: boolean): StageDef[] => {
+  if (!gitOnly) return STAGES;
+  return STAGES.map((stage) => {
+    if (stage.id === 'model') {
+      return {
+        ...stage,
+        title: 'Git score',
+        about: `Risk comes from git hunk overlap. Nemotron ${NEEDS_NEBIUS_KEY}.`,
+      };
+    }
+    if (stage.id === 'verify') {
+      return {
+        ...stage,
+        title: 'Intent tests',
+        about: `Intent test generation ${NEEDS_NEBIUS_KEY}. Branch tests still run.`,
+      };
+    }
+    return stage;
+  });
+};
+
+/** What a skipped model step should say once health confirms git-only mode. */
+export const skippedModelDetail = (id: StageId, fallback: string | null | undefined): string | null | undefined => {
+  if (id === 'model') return `Nemotron ${NEEDS_NEBIUS_KEY}.`;
+  if (id === 'verify') return `Intent test generation ${NEEDS_NEBIUS_KEY}.`;
+  return fallback;
+};
 
 export type StageState = 'idle' | 'running' | 'done' | 'skipped';
 

@@ -5,6 +5,7 @@ import { analyzeStream, StreamUnavailableError } from './services/stream';
 import { classifyRepoInput } from './utils/repo';
 import { describeError, BACKEND_START_COMMAND } from './utils/errors';
 import { rankPairs, summaryLine } from './utils/verdict';
+import { sentinelMode } from './utils/agent';
 import { activeStage, finishRun, formatClock, initialRun, pairKey, reduceRun } from './utils/run';
 import type { RunState } from './utils/run';
 import { formatHash, parseHash } from './utils/hash';
@@ -318,6 +319,8 @@ function App() {
   };
 
   const backendOffline = healthChecked && !health;
+  const gitOnly = health !== null && sentinelMode(health) === 'git only';
+  const modelReady = health !== null && !gitOnly;
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
   const pairs = response?.pairs ?? run.pairs;
   const selected = pairs.find((p) => pairKey(p) === selectedKey) ?? null;
@@ -345,14 +348,20 @@ function App() {
       </header>
 
       <main className="page" id="main" tabIndex={-1}>
+        {gitOnly && (
+          <p className="mode-note" role="status">
+            <strong>Git-only scores.</strong> This demo runs without a Nebius Token Factory key, so Nemotron and Tavily are off. Risk comes from git hunk overlap and the branch tests still run.
+          </p>
+        )}
         <section className="intake" data-phase={phase} aria-labelledby="intake-heading">
           <h1 id="intake-heading" className={phase === 'idle' ? 'intake-title' : 'intake-title is-compact'}>
             Find branch pairs that merge cleanly and still break
           </h1>
           {phase === 'idle' && (
             <p className="intake-lede">
-              MergeGuard diffs every branch against the base, asks Nemotron which pairs interact, and proves a
-              conflict by running tests on the merged code.
+              {modelReady
+                ? 'MergeGuard diffs every branch against the base, asks Nemotron which pairs interact, and proves a conflict by running tests on the merged code.'
+                : 'MergeGuard diffs every branch against the base, scores pairs from git hunk overlap, and proves a conflict by running each branch\'s tests on the merged code.'}
             </p>
           )}
 
@@ -437,7 +446,9 @@ function App() {
                   </button>
                   {phase === "idle" && (
                     <p className="demo-note" id="api-demo-note">
-                      Payments client on requests and pydantic. Tavily looks up the library docs Nemotron reads.
+                      {gitOnly
+                        ? 'Payments client on requests and pydantic. Tavily lookup needs a Nebius key; not enabled in this demo.'
+                        : 'Payments client on requests and pydantic. Tavily looks up the library docs Nemotron reads.'}
                     </p>
                   )}
                 </div>
@@ -506,6 +517,7 @@ function App() {
               mode={pipelineMode}
               elapsedS={elapsed}
               onCancel={loading ? cancel : undefined}
+              gitOnly={gitOnly}
             />
           )}
         </div>
@@ -543,10 +555,17 @@ function App() {
                   usage={response?.usage ?? null}
                   provisional={loading}
                   headingRef={detailRef}
+                  gitOnly={gitOnly}
                 />
               ) : (
                 <p className="detail-empty">
-                  {loading ? 'Pairs appear here as Nemotron scores them.' : pairs.length === 0 ? 'Analyze a repository with at least two branches besides the base to see pair evidence.' : 'Choose a pair to see the evidence.'}
+                  {loading
+                    ? modelReady
+                      ? 'Pairs appear here as Nemotron scores them.'
+                      : 'Pairs appear here as git scores them.'
+                    : pairs.length === 0
+                      ? 'Analyze a repository with at least two branches besides the base to see pair evidence.'
+                      : 'Choose a pair to see the evidence.'}
                 </p>
               )}
             </div>
@@ -565,8 +584,17 @@ function App() {
       <footer className="footer">
         <p><a href={advanced ? '/' : '/?advanced=1'}>{advanced ? 'Demo view' : 'More tools'}</a></p>
         <p>
-          Risk explanations and intent tests by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from
-          Tavily. API at <code>{API_BASE_URL || window.location.origin}</code>.
+          {gitOnly ? (
+            <>
+              Git scoring and branch tests run without a model. Using Nemotron, intent tests, the resolver, or Tavily
+              needs a Nebius key; not enabled in this demo. API at <code>{API_BASE_URL || window.location.origin}</code>.
+            </>
+          ) : (
+            <>
+              Risk explanations and intent tests by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from
+              Tavily. API at <code>{API_BASE_URL || window.location.origin}</code>.
+            </>
+          )}
         </p>
       </footer>
     </div>
