@@ -1,6 +1,22 @@
-# MergeGuard
+# PRshik
 
-MergeGuard catches branches that merge cleanly in Git but break together. Sentinel compares in-flight branches, uses NVIDIA Nemotron 3 Super on Nebius Token Factory to explain semantic risk, and checks the merged result with branch tests and generated intent tests. The dashboard and MCP tools return the risky pair and its test evidence. Built for the Nebius x NVIDIA hackathon; Tavily grounds model prompts with library documentation.
+**Catch the branches that merge cleanly but break together, and get the failing test that proves it.**
+
+Git checks whether two branches' text merges. CI tests each branch on its own.
+Neither checks whether the merged code still works. PRshik compares every pair of
+in-flight branches, flags the pairs likely to break each other, and runs tests on
+the merged checkout to prove it. Built for the Nebius x NVIDIA Global AI Hackathon
+with NVIDIA Nemotron 3 Super on Nebius Token Factory, and Tavily for library docs.
+
+| Agent | Job | What it does |
+|-------|-----|--------------|
+| **Sentinel** | *Predict* | Scores every branch pair from git diffs and a symbol/call prefilter, asks Nemotron to explain the riskiest pairs, then proves regressions with each branch's own tests and Nemotron-generated intent tests on the merge. |
+| **Planner** | *Prevent* | Groups branches into independent zones that share no medium- or high-risk pair, and orders merges riskiest-first. No model call (`POST /api/plan`). |
+| **Resolver** | *Resolve* | Reproduces a Git conflict in a throwaway worktree, asks Nemotron for a resolution, and returns a patch with validation results for human review (`POST /api/resolve`). |
+
+- **Try it:** the [hosted demo](https://mergeguard-demo.onrender.com) (no login or keys; click **Try demo repo**), or run it locally in [2 commands](#run-it-in-2-commands).
+- **Real-world evidence:** four semantic conflicts from public repos, each confirmed in 3 of 3 runs, in the [Hall of Fame](docs/HALL_OF_FAME.md). The [660-case benchmark](docs/bench/RESULTS.md) publishes every number, misses included.
+- **For coding agents:** an [MCP server](#mcp-server-for-cursor-claude-code-and-other-agents) exposes the same checks.
 
 ## Hosted demo: git-only
 
@@ -12,26 +28,20 @@ What needs `NEBIUS_API_KEY`: Nemotron risk refinement, generated intent tests, t
 
 To enable that path locally, copy `.env.example` to `backend/.env`, set `NEBIUS_API_KEY`, and optionally `TAVILY_API_KEY`. Restart the API. Never commit the key. The Nebius and Nemotron sections below are the reference for this optional path.
 
-## Public hosting on Render (free)
+The free Render server sleeps after 15 minutes idle, so the first load can take
+30–60 seconds. Render may show its own wake-up page first; the dashboard then
+shows "Waking up the free server" and retries until the API answers.
+
+## Deploy your own on Render (free)
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard/tree/hosting-setup)
-
-Dima: click **Deploy to Render**, sign in to your existing Render account, select
-`hosting-setup` if prompted, and apply the Blueprint. Open the service's public
-`https://<service>.onrender.com` URL and click **Try demo repo**. Judges need no
-login, API key, or local setup. No account or deployment is created by this repo.
 
 The root Dockerfile builds the dashboard with Node 22 and serves it alongside
 `/api` from one Python web service. `render.yaml` selects the free plan,
 `DEMO_MODE=true`, and `/api/health`; no variables or secrets need filling in.
 Remote repositories, other local paths, and GitHub routes return 403 in demo
 mode. With no keys the demo uses git scoring and deterministic branch tests.
-
-Render free services sleep after 15 minutes idle. The first load can take
-about 30–60 seconds. Render may show its own wake-up page before it can serve
-our dashboard; once the dashboard loads, it shows “Waking up the free server,
-first load can take ~1 minute” while health checks retry with backoff. Wait for
-the demo buttons to become available. See [deployment details](docs/DEPLOY.md).
+See [deployment details](docs/DEPLOY.md).
 
 ## Run it in 2 commands
 
@@ -111,13 +121,9 @@ repositories. Branch tests run before model scoring; generated tests run only
 for eligible high-risk pairs. FastAPI and the stdio MCP server share the engine;
 the MCP server does not need a running HTTP server.
 
-## The three agents
+## Stack
 
-| Agent | Role | Status |
-|-------|------|--------|
-| **Sentinel** | *Predict* — scores conflict risk between every pair of in-flight branches from git hunk overlap, then optionally refines the riskiest pairs with NVIDIA Nemotron on Nebius Token Factory. | ✅ MVP |
-| **Planner** | *Prevent* — decomposes work into non-overlapping "zones" and suggests merge/rebase order. | ⏳ planned |
-| **Merger / Resolver** | *Resolve* — reproduces Git conflicts in an isolated worktree, asks Nebius for text resolutions, optionally researches docs with Tavily, and returns a patch with validation results. | ✅ MVP |
+The three agents are summarized at the [top of this README](#prshik).
 
 - **LLM:** NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) on Nebius Token Factory, an OpenAI-compatible API at `https://api.tokenfactory.nebius.com/v1/`
 - **Library docs:** Tavily, called at runtime by Sentinel and verify-by-test
@@ -125,16 +131,16 @@ the MCP server does not need a running HTTP server.
 
 ## How Nebius Token Factory and Tavily are used
 
-**Nebius Token Factory** serves NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`). MergeGuard does not call another model. Two jobs use it:
+**Nebius Token Factory** serves NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`). PRshik does not call another model. Sentinel uses it for two jobs:
 
 - **Pair risk explanations.** After the static prefilter, Sentinel sends up to `NEBIUS_MAX_PAIRS` pairs to Nemotron and blends the model's `risk_score` with the git score. Details are under [Nemotron risk refinement](#nemotron-risk-refinement).
 - **Intent tests.** Verify-by-test asks Nemotron to write one pytest module for a high-risk pair, then runs it in throwaway worktrees. Details are under [Verify-by-test](#verify-by-test-intent-tests-semantic-conflicts-with-evidence).
 
 Each chat-completions call is a single attempt: the client sets `max_retries=0` and waits `NEBIUS_TIMEOUT_SECONDS` (default 40). Verify-by-test can still make several generations when a test fails on its own branch (`VERIFY_MAX_ATTEMPTS` in `.env.example` is 3). A rationale that contradicts the static signature checks gets one repair call. The response `usage` block prices prompt and completion tokens with `NEMOTRON_INPUT_USD_PER_1M` / `NEMOTRON_OUTPUT_USD_PER_1M` (defaults 0.30 / 0.90). Risk results are cached on disk under `WORKSPACE_DIR/nemotron-cache/`. Generated tests are cached under `WORKSPACE_DIR/verify-cache/`. An empty `NEBIUS_API_KEY`, or `NEBIUS_ENABLED=false`, keeps the git score and skips both jobs. The HTTP request still succeeds.
 
-The Planner and Merger agents are still planned. Token Factory is not used to produce a semantic merge.
+The Resolver also calls Nemotron, to propose conflict resolutions; see [Resolver](#resolver). The Planner makes no model call.
 
-**Tavily** looks up current library documentation and adds it to those two prompts. The lookup lives in the Sentinel / verify engine. Earlier notes that put Tavily only on the future Merger are out of date.
+**Tavily** looks up current library documentation and adds it to those two prompts. The lookup lives in the Sentinel / verify engine. The Resolver can also run an explicit Tavily search when asked; see [Resolver](#resolver).
 
 Both call sites are on the model path. An empty `NEBIUS_API_KEY` or `NEBIUS_ENABLED=false` skips Tavily as well, because Sentinel never builds those prompts. On a Nemotron cache miss, and again when verify-by-test builds a test prompt, `docs_lookup` reads the pair's changed Python and JavaScript/TypeScript. It keeps third-party imports and drops the Python standard library, Node built-ins, relative imports, and modules that belong to the repo. It sends at most two searches (one per library, at most two symbols each) as an httpx `POST` to `https://api.tavily.com/search`, with `TAVILY_TIMEOUT_SECONDS` (default 8) and `TAVILY_MAX_RESULTS` (default 3). A query names symbols from the conflicting lines: `from fastapi import Depends` becomes `fastapi Depends documentation`, and a call such as `requests.get(...)` or `session.mount(...)` after `requests.Session()` becomes `requests get documentation` or `requests Session.mount documentation`. For JavaScript, `import { useEffect } from 'react'` becomes `react useEffect documentation`. Names and attributes on added or removed lines win over imports the hunk does not use. A bare import with no symbol stays `<library> documentation`. For `requests`, `fastapi`, `pydantic`, and `react`, the request sets `include_domains` to the official docs host (`requests.readthedocs.io`, `fastapi.tiangolo.com`, `docs.pydantic.dev`, `react.dev`). Other libraries are not domain-filtered. A hit whose title and content do not mention the library is dropped. Dropping every hit is not an error. Snippets are trimmed to 700 characters each and 2000 characters in total, then placed under the heading `Library documentation (via Tavily web search)`. A missing key, `TAVILY_ENABLED=false`, or no third-party import leaves the prompt unchanged. A failed search is logged and dropped. Snippets from a search that did succeed are still added. Analysis still finishes.
 
@@ -470,7 +476,7 @@ needs `uv` and network once for the project venv; no Postgres needed):
 python3 demo/replay.py --case real-case-1 --prove   # demo/replay_case_1.py still works
 ```
 
-More real cases, and the ones MergeGuard did not confirm, are in the
+More real cases, and the ones PRshik did not confirm, are in the
 [Semantic Conflict Hall of Fame](docs/HALL_OF_FAME.md)
 (`python3 demo/replay.py --list`). With the branch-test stage, the current
 pipeline confirms daimon, KISS and elastic 3/3 each (daimon by both layers,
@@ -489,7 +495,7 @@ What `--prove` shows (`pytest packages/adapters/discord/tests -k "branding or pr
 | A+B | **2 failed**, 88 passed (`test_branding.py`: pydantic `ValidationError`, `slack_user_tokens` / `slack_turn_contexts` *Field required*) |
 | A+B + upstream fix `239fdb55` | 90 passed |
 
-What MergeGuard reported on `demo/real-case-1` (one fresh run, `use_cache=false`):
+What PRshik reported on `demo/real-case-1` (one fresh run, `use_cache=false`):
 
 - **Prefilter**: candidate (0 shared files). Top evidence: `PurgePreview: changed by pr-14-sync-fixes (packages/core/daimon/core/privacy.py), called by pr-17-deploy-review-findings (packages/adapters/discord/tests/test_branding.py)`, labelled *breaking signature change: new required slack_user_tokens, slack_turn_contexts; call site does not pass new required ...*.
 - **Nemotron**: 85/100, high (git heuristic: 0). It also claims that a `create_session` change breaks `bot.py`; the static evidence shows that call site does not pass the removed parameter, so that part of the rationale is wrong.
