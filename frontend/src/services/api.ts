@@ -1,6 +1,6 @@
 import type { AnalyzeRequest, AnalyzeResponse, HealthResponse } from '../types';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 /**
  * Parse an error response body. FastAPI returns `{ detail: "..." }` for 4xx,
@@ -49,7 +49,7 @@ export async function analyzeRepo(request: AnalyzeRequest): Promise<AnalyzeRespo
 }
 
 export async function checkHealth(): Promise<HealthResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/health`);
+  const response = await fetch(`${API_BASE_URL}/api/health`, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) {
     throw new Error(await readError(response));
   }

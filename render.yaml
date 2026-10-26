@@ -1,27 +1,13 @@
-# Render Blueprint for the hosted demo API. No-card alternative to Railway.
-# Free web service: 512 MB RAM, sleeps after 15 minutes without inbound
-# traffic, about one minute to wake. Nothing here creates a service until a
-# Render user applies the Blueprint. See docs/DEPLOY.md.
+# One public dashboard + API, no keys or CORS configuration required.
 services:
   - type: web
-    name: mergeguard-demo-api
+    name: mergeguard-demo
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
-    autoDeploy: false
+    autoDeployTrigger: "off"
     envVars:
       - key: DEMO_MODE
         value: "true"
-      # The Vercel origin, no trailing slash. Set in the dashboard.
-      - key: CORS_ALLOW_ORIGINS
-        sync: false
-      - key: CORS_ALLOW_ORIGIN_REGEX
-        sync: false
-      # Optional secrets. Empty keeps git-only scores and skips doc lookup.
-      # Use a dedicated low-balance Token Factory key, never the benchmark key.
-      - key: NEBIUS_API_KEY
-        sync: false
-      - key: TAVILY_API_KEY
-        sync: false

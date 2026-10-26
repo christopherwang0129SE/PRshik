@@ -2,6 +2,27 @@
 
 MergeGuard catches branches that merge cleanly in Git but break together. Sentinel compares in-flight branches, uses NVIDIA Nemotron 3 Super on Nebius Token Factory to explain semantic risk, and checks the merged result with branch tests and generated intent tests. The dashboard and MCP tools return the risky pair and its test evidence. Built for the Nebius x NVIDIA hackathon; Tavily grounds model prompts with library documentation.
 
+## Public hosting on Render (free)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard/tree/hosting-setup)
+
+Dima: click **Deploy to Render**, sign in to your existing Render account, select
+`hosting-setup` if prompted, and apply the Blueprint. Open the service's public
+`https://<service>.onrender.com` URL and click **Try demo repo**. Judges need no
+login, API key, or local setup. No account or deployment is created by this repo.
+
+The root Dockerfile builds the dashboard with Node 22 and serves it alongside
+`/api` from one Python web service. `render.yaml` selects the free plan,
+`DEMO_MODE=true`, and `/api/health`; no variables or secrets need filling in.
+Remote repositories, other local paths, and GitHub routes return 403 in demo
+mode. With no keys the demo uses git scoring and deterministic branch tests.
+
+Render free services sleep after 15 minutes idle. The first load can take
+about 30–60 seconds. Render may show its own wake-up page before it can serve
+our dashboard; once the dashboard loads, it shows “Waking up the free server,
+first load can take ~1 minute” while health checks retry with backoff. Wait for
+the demo buttons to become available. See [deployment details](docs/DEPLOY.md).
+
 ## Run it in 2 commands
 
 Prerequisites: Python 3.11+, Node.js 22, Git 2.38+ and Make, on Linux or macOS.

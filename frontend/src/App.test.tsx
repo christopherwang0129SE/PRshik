@@ -220,3 +220,30 @@ describe('App', () => {
     expect(screen.getByText('cd backend && uvicorn app.main:app --port 8000')).toBeInTheDocument();
   });
 });
+
+describe('hosted cold start', () => {
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it('shows a friendly notice, backs off and enables demos after recovery', async () => {
+    vi.stubEnv('PROD', true);
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(jsonResponse(HEALTH));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    const { act } = await import('@testing-library/react');
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText(/Waking up the free server/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try demo repo' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText(/Waking up the free server/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try demo repo' })).toBeEnabled();
+  });
+});
