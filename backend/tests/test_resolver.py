@@ -169,7 +169,20 @@ def test_test_command_timeout(repo, model, monkeypatch):
     assert "timed out" in result.validations[-1].output
 
 
-def test_api_and_invalid_ref(repo, model):
+def test_resolve_without_a_key_is_503_json(repo, monkeypatch):
+    monkeypatch.setattr(settings, "nebius_api_key", "")
+    monkeypatch.setattr(settings, "nebius_enabled", True)
+    client = TestClient(app)
+    response = client.post("/api/resolve", json=request(repo).model_dump())
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert isinstance(detail, str)
+    assert "needs a Nebius key" in detail
+    assert "not enabled in this demo" in detail
+
+
+def test_api_and_invalid_ref(repo, model, monkeypatch):
+    monkeypatch.setattr(settings, "nebius_api_key", "test-key")
     client = TestClient(app)
     response = client.post("/api/resolve", json=request(repo).model_dump())
     assert response.status_code == 200

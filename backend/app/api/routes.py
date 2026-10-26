@@ -417,13 +417,22 @@ def pair_diff(req: PairDiffRequest) -> PairDiffResponse:
         raise HTTPException(400, _safe_detail(exc)) from exc
 
 
+_RESOLVE_NEEDS_KEY = "The resolver needs a Nebius key; not enabled in this demo."
+
+
 @router.post("/resolve", response_model=ResolveResponse)
 def resolve(req: ResolveRequest) -> ResolveResponse:
     _require_bundled_repo(req.repo_path)
+    # Conflict text is a model call. Refuse before any worktree when the key is off,
+    # so a missing key is a clear 503 instead of a 500 or a vague needs_review.
+    if not settings.nebius_ready:
+        raise HTTPException(503, _RESOLVE_NEEDS_KEY)
     try:
         return resolver.resolve(req)
     except git_service.GitError as e:
         raise HTTPException(400, str(e)) from e
+    except resolver.ProviderError as e:
+        raise HTTPException(503, _RESOLVE_NEEDS_KEY if not settings.nebius_ready else str(e)) from e
 
 
 @router.get("/github/pull-requests", response_model=GitHubPullRequestSyncResponse)
