@@ -12,6 +12,7 @@ const jsonResponse = (data: unknown, status = 200) =>
   });
 
 const HEALTH = {
+  demo_mode: false,
   status: 'ok',
   nebius_ready: true,
   nebius_enabled: true,
@@ -155,7 +156,7 @@ describe('App', () => {
   beforeEach(() => {
     localStorage.clear();
     clearPairDiffCache();
-    window.history.replaceState(null, '', '/');
+    window.history.replaceState(null, '', '/?advanced=1');
     routes = {
       '/api/health': () => Promise.resolve(jsonResponse(HEALTH)),
       '/api/pair-diff': () => Promise.resolve(jsonResponse(DIFF)),
@@ -189,6 +190,27 @@ describe('App', () => {
     expect(JSON.parse(localStorage.getItem('mergeguard.runs.v1')!)).toEqual([]);
   });
 
+  it('keeps the default view focused on checkout and hides setup and empty history', async () => {
+    window.history.replaceState(null, '', '/');
+    render(<App />);
+    await screen.findByText('Sentinel online');
+    expect(screen.getByRole('button', { name: 'Try demo repo' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Repository')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Analysis history/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try API demo (Tavily)' })).not.toBeInTheDocument();
+    expect(calls('/api/repositories')).toHaveLength(0);
+  });
+
+  it('hides arbitrary repository input and GitHub queue in advanced demo mode', async () => {
+    route('/api/health', () => Promise.resolve(jsonResponse({ ...HEALTH, demo_mode: true })));
+    route('/api/repositories', () => Promise.resolve(jsonResponse({ repositories: [] })));
+    render(<App />);
+    await screen.findByText(/GitHub browsing is unavailable in demo mode/);
+    expect(screen.queryByLabelText('Repository')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('GitHub repository')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load pull requests' })).not.toBeInTheDocument();
+  });
+
   it('refreshes pair diffs when a new analysis starts on the same branch names', async () => {
     route('/api/analyze/stream', () => Promise.resolve(new Response(
       JSON.stringify({ type: 'result', result: RESULT, t: 1 }) + '\n',
@@ -199,7 +221,7 @@ describe('App', () => {
     await screen.findByTestId('run-summary');
     await screen.findByText('checkout.py');
     expect(calls('/api/pair-diff')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: /^Analyze$/ }));
     await screen.findByTestId('run-summary');
     await screen.findByText('checkout.py');
     expect(calls('/api/pair-diff')).toHaveLength(2);
@@ -314,7 +336,7 @@ describe('App', () => {
   });
 
   it('runs the analysis named in a shared link and opens its pair', async () => {
-    window.history.replaceState(null, '', '/#repo=/tmp/shop&base=develop&pair=docs/readme..feat/discount-cap');
+    window.history.replaceState(null, '', '/?advanced=1#repo=/tmp/shop&base=develop&pair=docs/readme..feat/discount-cap');
     route('/api/analyze/stream', () => {
       const s = controllableStream();
       s.push({ type: 'result', result: { ...RESULT, base_branch: 'develop' }, t: 1 });

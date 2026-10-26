@@ -223,6 +223,7 @@ def _verify_allowed(req: AnalyzeRequest, repo: Path) -> bool:
 def health() -> dict:
     return {
         "status": "ok",
+        "demo_mode": settings.demo_mode,
         "nebius_ready": settings.nebius_ready,
         "nebius_enabled": settings.nebius_enabled,
         "nebius_model": settings.nebius_model,

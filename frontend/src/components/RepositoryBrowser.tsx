@@ -3,8 +3,8 @@ import { API_BASE_URL, readError } from '../services/api';
 
 interface Repository { name: string; repo_path: string; base_branch: string; branches: string[]; available: boolean }
 interface Pull { number: number; title: string; author: string; url: string; head_branch: string; base_branch: string }
-export function RepositoryBrowser({ disabled, onAnalyze }: {
-  disabled: boolean; onAnalyze: (repo: string, base: string) => void;
+export function RepositoryBrowser({ disabled, onAnalyze, demoMode = false }: {
+  disabled: boolean; onAnalyze: (repo: string, base: string) => void; demoMode?: boolean;
 }) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [repoError, setRepoError] = useState('');
@@ -15,6 +15,7 @@ export function RepositoryBrowser({ disabled, onAnalyze }: {
   const [pulls, setPulls] = useState<Pull[] | null>(null);
   const [pullError, setPullError] = useState('');
   const [pullLoading, setPullLoading] = useState(false);
+  const [queueLocked, setQueueLocked] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     fetch(`${API_BASE_URL}/api/repositories`, { signal: controller.signal }).then(async (r) => {
@@ -27,9 +28,11 @@ export function RepositoryBrowser({ disabled, onAnalyze }: {
   }, [revision]);
   const loadPulls = async (e: React.FormEvent) => {
     e.preventDefault(); setPullLoading(true); setPullError(''); setPulls(null);
+    if (demoMode || queueLocked) { setPullLoading(false); return; }
     const slug = github.trim().replace(/^https:\/\/github.com\//, '').replace(/\/$/, '');
     try {
       const r = await fetch(`${API_BASE_URL}/api/github/pulls?${new URLSearchParams({ repository: slug, base_branch: base.trim() || 'main' })}`);
+      if (r.status === 403) { setQueueLocked(true); return; }
       if (!r.ok) throw new Error(await readError(r));
       const data = await r.json() as { pull_requests: Pull[] };
       setPulls(data.pull_requests);
@@ -50,6 +53,7 @@ export function RepositoryBrowser({ disabled, onAnalyze }: {
           </div>
           <button className="btn" disabled={disabled || !repo.available} onClick={() => onAnalyze(repo.repo_path, repo.base_branch)}>Analyze {repo.name}</button>
         </li>)}</ul>
+        {(demoMode || queueLocked) ? <p role="status">GitHub browsing is unavailable in demo mode. Choose a bundled repository.</p> : <>
         <h2>GitHub pull requests</h2>
         <p>Choose a base branch to list its open PRs. Analyzing a PR compares it with up to eight other open PRs on its base.</p>
         <form className="queue-form" onSubmit={loadPulls}>
@@ -63,6 +67,7 @@ export function RepositoryBrowser({ disabled, onAnalyze }: {
           <div><a href={pull.url} target="_blank" rel="noreferrer">#{pull.number} {pull.title}</a><p>{pull.author} · {pull.head_branch} into {pull.base_branch}</p></div>
           <button className="btn" disabled={disabled} onClick={() => onAnalyze(pull.url, pull.base_branch)}>Analyze PR #{pull.number}</button>
         </li>)}</ul>}
+        </>}
       </div>
     </details>
   </section>;

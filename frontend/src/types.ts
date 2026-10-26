@@ -194,6 +194,7 @@ export interface AnalyzeResponse {
 }
 
 export interface HealthResponse {
+  demo_mode?: boolean;
   status: string;
   nebius_ready: boolean;
   nebius_enabled: boolean;

@@ -10,6 +10,7 @@ import { PairDiff } from './PairDiff';
 import { VerificationDetails } from './VerificationDetails';
 import { BranchTestDetails } from './BranchTestDetails';
 import { DocsSources } from './DocsSources';
+import { advancedView } from '../utils/presentation';
 
 interface PairDetailProps {
   pair: PairRisk;
@@ -209,7 +210,17 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         <BranchTestDetails branchTests={pair.branch_tests} branchA={pair.branch_a} branchB={pair.branch_b} />
       )}
       <DocsSources sources={docs} />
-      <Cost pair={pair} usage={usage} />
+      {verdict === 'confirmed' && [pair.branch_a, pair.branch_b].includes('feat/discount-cap') && [pair.branch_a, pair.branch_b].includes('feat/tax-before-discount') && (
+        <section className="block" aria-labelledby="suggestion-heading">
+          <h3 id="suggestion-heading" className="block-title">Suggested next step</h3>
+          <div className="block-body">
+            <p>Agree on whether the discount cap applies before or after tax. Keep the cap on the pre-tax subtotal, then apply tax, if preserving the discount branch’s contract.</p>
+            <p>Update the competing tax-order contract and rerun both branches’ tests together before merging.</p>
+            <p className="muted">Demo guidance for human review. This dashboard has no integrated planner or resolver and has not applied a fix.</p>
+          </div>
+        </section>
+      )}
+      {advancedView() && <Cost pair={pair} usage={usage} />}
     </article>
   );
 };

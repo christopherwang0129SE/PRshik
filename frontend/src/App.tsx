@@ -19,6 +19,7 @@ import { RepositoryBrowser } from './components/RepositoryBrowser';
 import { readHistory, storeHistory } from './services/history';
 import type { SavedRun } from './services/history';
 import './App.css';
+import { advancedView } from './utils/presentation';
 
 // Demo repo paths, injected by Vite (see vite.config.ts `define`).
 // An empty string hides that button.
@@ -40,6 +41,7 @@ const isAbort = (err: unknown): boolean =>
 const STACKED = '(max-width: 959px)';
 
 function App() {
+  const advanced = advancedView();
   const [history, setHistory] = useState<SavedRun[]>(readHistory);
   const historyRef = useRef(history);
   const [historyWarning, setHistoryWarning] = useState('');
@@ -334,7 +336,7 @@ function App() {
             </p>
           )}
 
-          <form onSubmit={handleSubmit} className="repo-form" noValidate aria-label="Analyze a repository">
+          {advanced && health?.demo_mode !== true && <form onSubmit={handleSubmit} className="repo-form" noValidate aria-label="Analyze a repository">
             <div className="field field-repo">
               <label htmlFor="repo-input">Repository</label>
               <input
@@ -380,7 +382,7 @@ function App() {
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading ? 'Analyzing…' : 'Analyze'}
             </button>
-          </form>
+          </form>}
 
           {(DEMO_REPO_PATH || API_DEMO_REPO_PATH) && (
             <div className="demos" role="group" aria-label="Bundled demos">
@@ -388,7 +390,7 @@ function App() {
                 <div className="demo">
                   <button
                     type="button"
-                    className="btn btn-demo"
+                    className="btn btn-primary"
                     onClick={() => handleTryDemo(DEMO_REPO_PATH)}
                     disabled={loading}
                     aria-describedby={phase === 'idle' ? 'demo-note' : undefined}
@@ -402,7 +404,7 @@ function App() {
                   )}
                 </div>
               )}
-              {API_DEMO_REPO_PATH && (
+              {advanced && API_DEMO_REPO_PATH && (
                 <div className="demo">
                   <button
                     type="button"
@@ -436,11 +438,11 @@ function App() {
           )}
         </section>
 
-        <RepositoryBrowser disabled={loading} onAnalyze={(repo, base) => {
+        {advanced && <RepositoryBrowser demoMode={health?.demo_mode !== false} disabled={loading} onAnalyze={(repo, base) => {
           wantedPair.current = null;
           setRepoInput(repo); setBaseBranch(base); runAnalysis(repo, base);
-        }} />
-        <section className="library" aria-label="Analysis history">
+        }} />}
+        {(advanced || history.length > 0) && <section className="library" aria-label="Analysis history">
           <details>
             <summary>Analysis history <span className="tabular">({history.length})</span></summary>
             <div className="library-body">
@@ -459,7 +461,7 @@ function App() {
               </>}
             </div>
           </details>
-        </section>
+        </section>}
         {restoredAt && <p className="notice" role="status">Saved verdict from {new Date(restoredAt).toLocaleString()}. Diffs load from the repository as it is now. Run Analyze to check current branch heads.</p>}
 
         <p className="sr-only" role="status" aria-live="polite">
@@ -523,9 +525,18 @@ function App() {
             </div>
           </div>
         )}
+        {phase === 'done' && <section className="library" aria-labelledby="credibility-heading">
+          <div className="library-body">
+            <h2 id="credibility-heading">Beyond the demo</h2>
+            <p>Replayable public-repository cases include daimon, KISS, Elastic and qwen-code. The checked-in report records exact commits, test evidence, costs and limitations.</p>
+            <p><a href="https://github.com/christopherwang0129SE/mergeguard/blob/feat/rich-functional-ui-1025/docs/HALL_OF_FAME.md" target="_blank" rel="noreferrer">Read the real-repo evidence</a></p>
+            <p>Before merging, check what the branches assume together. A clean git merge is only the beginning.</p>
+          </div>
+        </section>}
       </main>
 
       <footer className="footer">
+        <p><a href={advanced ? '/' : '/?advanced=1'}>{advanced ? 'Demo view' : 'More tools'}</a></p>
         <p>
           Risk explanations and intent tests by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from
           Tavily. API at <code>{API_BASE_URL}</code>.
