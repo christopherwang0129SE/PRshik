@@ -556,7 +556,7 @@ function App() {
           <div className="library-body">
             <h2 id="credibility-heading">Beyond the demo</h2>
             <p>Replayable public-repository cases include daimon, KISS, Elastic and qwen-code. The checked-in report records exact commits, test evidence, costs and limitations.</p>
-            <p><a href="https://github.com/christopherwang0129SE/mergeguard/blob/feat/rich-functional-ui-1025/docs/HALL_OF_FAME.md" target="_blank" rel="noreferrer">Read the real-repo evidence</a></p>
+            <p><a href="https://github.com/christopherwang0129SE/mergeguard/blob/main/docs/HALL_OF_FAME.md" target="_blank" rel="noreferrer">Read the real-repo evidence</a></p>
             <p>Before merging, check what the branches assume together. A clean git merge is only the beginning.</p>
           </div>
         </section>}
