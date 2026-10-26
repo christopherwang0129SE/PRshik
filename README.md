@@ -34,7 +34,7 @@ shows "Waking up the free server" and retries until the API answers.
 
 ## Deploy your own on Render (free)
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard/tree/hosting-setup)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard)
 
 The root Dockerfile builds the dashboard with Node 22 and serves it alongside
 `/api` from one Python web service. `render.yaml` selects the free plan,
@@ -161,7 +161,7 @@ The bundled checkout demo imports only the Python standard library, so Tavily st
 
 ## Setup
 
-Hosted demo (Vercel + Railway): [docs/DEPLOY.md](docs/DEPLOY.md).
+Hosted demo (one Render service): [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Backend
 
