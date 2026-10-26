@@ -1,0 +1,13 @@
+# One public dashboard + API, no keys or CORS configuration required.
+services:
+  - type: web
+    name: mergeguard-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: DEMO_MODE
+        value: "true"

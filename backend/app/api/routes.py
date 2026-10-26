@@ -34,8 +34,8 @@ def bundled_demo_repos() -> list[Path]:
     return [(root / name).resolve() for name in _DEMO_REPO_NAMES]
 
 
-def _demo_mode_guard(req: AnalyzeRequest) -> None:
-    """Refuse anything except the bundled demos before a path is opened or cloned."""
+def _require_bundled_repo(repo_path: str | None, repo_url: str | None = None) -> None:
+    """In demo mode, refuse anything except the bundled demos before a path is opened or cloned."""
     if not settings.demo_mode:
         return
     allowed = bundled_demo_repos()
@@ -44,14 +44,24 @@ def _demo_mode_guard(req: AnalyzeRequest) -> None:
         f"({', '.join(str(path) for path in allowed)}). "
         "repo_url and other paths are not allowed."
     )
-    if req.repo_url or not (req.repo_path and req.repo_path.strip()):
+    if repo_url or not (repo_path and repo_path.strip()):
         raise HTTPException(403, detail)
     try:
-        repo = Path(req.repo_path).expanduser().resolve()
+        repo = Path(repo_path).expanduser().resolve()
     except OSError as exc:
         raise HTTPException(403, detail) from exc
     if repo not in allowed:
         raise HTTPException(403, detail)
+
+
+def _demo_mode_guard(req: AnalyzeRequest) -> None:
+    _require_bundled_repo(req.repo_path, req.repo_url)
+
+
+def _demo_mode_blocks_github() -> None:
+    """The GitHub routes clone the configured repository, so the public demo turns them off."""
+    if settings.demo_mode:
+        raise HTTPException(403, "Demo mode does not serve the GitHub routes.")
 
 
 @router.get("/health")
@@ -114,6 +124,7 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
 @router.post("/resolve", response_model=ResolveResponse)
 def resolve(req: ResolveRequest) -> ResolveResponse:
+    _require_bundled_repo(req.repo_path)
     try:
         return resolver.resolve(req)
     except git_service.GitError as e:
@@ -122,6 +133,7 @@ def resolve(req: ResolveRequest) -> ResolveResponse:
 
 @router.get("/github/pull-requests", response_model=GitHubPullRequestSyncResponse)
 def sync_github_pull_requests() -> GitHubPullRequestSyncResponse:
+    _demo_mode_blocks_github()
     repository = settings.github_repository.strip()
     if not repository:
         raise HTTPException(503, "GITHUB_REPOSITORY is not configured")
@@ -168,6 +180,7 @@ def sync_github_pull_requests() -> GitHubPullRequestSyncResponse:
 
 @router.get("/github/queue", response_model=GitHubReviewQueueResponse)
 def github_review_queue() -> GitHubReviewQueueResponse:
+    _demo_mode_blocks_github()
     repository = settings.github_repository.strip()
     if not repository:
         raise HTTPException(503, "GITHUB_REPOSITORY is not configured")

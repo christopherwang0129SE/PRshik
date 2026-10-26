@@ -1,7 +1,12 @@
-# Hosted demo API. Build from the repo root so the context includes demo/.
-# Layout: /app/backend (the working directory) and /app/demo.
-# verifier.DEMO_ROOT is parents[3] of backend/app/services/verifier.py plus
-# "demo", which is /app/demo here. VERIFY_ALLOWED_ROOTS can stay empty.
+# One public service: Node builds the dashboard; Python serves it and /api.
+FROM node:22-bookworm-slim AS dashboard
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+ENV VITE_DEMO_REPO_PATH=/app/demo/checkout-demo \
+    VITE_API_DEMO_REPO_PATH=/app/demo/api-demo
+RUN npm run build
 
 FROM python:3.12-slim
 
@@ -20,6 +25,7 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt "requests>=2.32,
 
 COPY backend/ /app/backend/
 COPY demo/ /app/demo/
+COPY --from=dashboard /frontend/dist/ /app/frontend/dist/
 
 RUN python3 /app/demo/make_demo_repo.py \
     && python3 /app/demo/make_api_demo_repo.py

@@ -26,6 +26,7 @@ function App() {
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
+  const [healthRetry, setHealthRetry] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [announcement, setAnnouncement] = useState('');
   // What the running analysis is looking at, for the progress line.
@@ -42,22 +43,36 @@ function App() {
     try {
       const res = await checkHealth();
       setHealth(res);
-    } catch (err) {
-      // Health unavailable -> Sentinel shows offline. Keep the panel visible.
+    } catch {
       setHealth(null);
-      console.error('Failed to fetch health', err);
+      setHealthRetry((attempt) => attempt + 1);
     } finally {
       setHealthChecked(true);
     }
   }, []);
 
   useEffect(() => {
-    // Fetch health on mount so the header reflects /api/health before any
-    // analyze. fetchHealth is async, so setHealth runs after the await, not
-    // synchronously in the effect.
-    // eslint-disable-next-line react/set-state-in-effect
-    fetchHealth();
-  }, [fetchHealth]);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let delay = 1000;
+    const poll = async () => {
+      try {
+        const res = await checkHealth();
+        if (!stopped) {
+          setHealth(res);
+          setHealthChecked(true);
+        }
+      } catch {
+        if (!stopped) {
+          setHealthChecked(true);
+          timer = setTimeout(poll, delay);
+          delay = Math.min(delay * 2, 10000);
+        }
+      }
+    };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [healthRetry]);
 
   // Elapsed-seconds clock while an analysis runs.
   useEffect(() => {
@@ -154,7 +169,7 @@ function App() {
           <a className="wordmark" href="/">
             MergeGuard
           </a>
-          <AgentStatus health={health} checked={healthChecked} />
+          <AgentStatus health={health} checked={healthChecked && !(import.meta.env.PROD && !health)} />
         </div>
       </header>
 
@@ -206,7 +221,7 @@ function App() {
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
             </div>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
+            <button type="submit" className="btn btn-primary" disabled={loading || (import.meta.env.PROD && !health)}>
               {loading ? 'Analyzing…' : 'Analyze'}
             </button>
           </form>
@@ -223,7 +238,7 @@ function App() {
                       type="button"
                       className="btn"
                       onClick={() => handleTryDemo(DEMO_REPO_PATH)}
-                      disabled={loading}
+                      disabled={loading || (import.meta.env.PROD && !health)}
                       aria-describedby={compact ? undefined : 'demo-note'}
                     >
                       Try demo repo
@@ -241,7 +256,7 @@ function App() {
                       type="button"
                       className="btn"
                       onClick={() => handleTryDemo(API_DEMO_REPO_PATH)}
-                      disabled={loading}
+                      disabled={loading || (import.meta.env.PROD && !health)}
                       aria-describedby={compact ? undefined : 'api-demo-note'}
                     >
                       Try API demo (Tavily)
@@ -258,10 +273,17 @@ function App() {
             </div>
           )}
 
-          {backendOffline && !error && (
+          {import.meta.env.PROD && !health && (
+            <div className="problem problem-quiet" role="status">
+              <p><strong>Waking up the free server, first load can take ~1 minute</strong></p>
+              <p>We’re checking the connection automatically. Demo buttons will be ready when the server responds.</p>
+            </div>
+          )}
+
+          {backendOffline && !error && import.meta.env.DEV && (
             <div className="problem problem-quiet">
               <p>
-                <strong>The backend isn&apos;t answering</strong> at <code>{API_BASE_URL}</code>. Start it from the
+                <strong>The backend isn&apos;t answering</strong> at <code>{API_BASE_URL || window.location.origin}</code>. Start it from the
                 repository root:
               </p>
               <pre className="code command" role="region" tabIndex={0} aria-label="Command to start the backend">
@@ -303,7 +325,7 @@ function App() {
       <footer className="footer">
         <p>
           Explanations by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from Tavily search. API at{' '}
-          <code>{API_BASE_URL}</code>.
+          <code>{API_BASE_URL || window.location.origin}</code>.
         </p>
       </footer>
     </div>

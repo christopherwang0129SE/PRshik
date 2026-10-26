@@ -22,6 +22,7 @@ Both plans need the project-creation approval in section 1. Hobby also needs the
 
 | Plan | Pay | Included | What you get |
 | --- | --- | --- | --- |
+| Free Trial (new account) | $0, no card | $5 one-time for 30 days | Up to 2 vCPU / 1 GB. Unverified GitHub accounts get restricted outbound network (Token Factory may be blocked; git-only demo still works). Then becomes Free. |
 | Free | $0 | $1/month usage credit | Max 1 vCPU and 0.5 GB RAM per service. App sleeping. |
 | Hobby | $5/month | $5 of usage | Past that, RAM $10/GB-month, CPU $20/vCPU-month, egress $0.05/GB. |
 
@@ -108,6 +109,7 @@ Verified locally on this branch. No hosting project was created for that check.
 
 - [ ] `POST /api/analyze` accepts only `/app/demo/checkout-demo` and `/app/demo/api-demo`
 - [ ] `repo_url`, and any other path, return 403 and are not cloned
+- [ ] `POST /api/resolve` accepts only the same two repositories; `/api/github/*` returns 403
 - [ ] With no keys, scores stay git-only, and branch tests still confirm both demos
 
 ## 7. Rollback / turn-off

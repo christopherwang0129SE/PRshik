@@ -39,9 +39,9 @@ describe('sentinelMode', () => {
     );
   });
 
-  it('is "git+Nemotron" when nebius_enabled is true', () => {
+  it('is "git only" when enabled but no key is configured', () => {
     expect(sentinelMode({ ...baseHealth, nebius_ready: false, nebius_enabled: true })).toBe(
-      'git+Nemotron'
+      'git only'
     );
   });
 
