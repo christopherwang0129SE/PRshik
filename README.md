@@ -191,7 +191,7 @@ npm ci
 npm run dev
 ```
 
-The dashboard is at http://localhost:3000 and calls the API at `http://localhost:8000` (`VITE_API_BASE_URL` overrides the API origin).
+The dashboard is at http://localhost:3000 and calls the API at `http://localhost:8000` (`VITE_API_BASE_URL` overrides the API origin). If the dashboard runs on a port other than 3000, set `CORS_ALLOW_ORIGINS=http://localhost:<port>` before starting the API (the default only allows port 3000).
 
 ### Try the Sentinel on any repo
 
@@ -203,6 +203,51 @@ curl -s -X POST http://localhost:8000/api/analyze \
 
 Returns a per-branch diff summary and a ranked list of branch-pair **conflict-risk
 scores** with human-readable rationales.
+
+### `POST /api/analyze/stream`
+
+Same JSON body as `POST /api/analyze`. The final `result` is that endpoint's
+response for the same request.
+
+Validation that fails before any analysis is a normal HTTP error with
+`{"detail": "..."}`: demo mode 403, not a git repo 400, no branches 400, clone
+failure 400. After that the response is `200` with
+`Content-Type: application/x-ndjson`, one JSON object per line:
+
+| `type` | When |
+| --- | --- |
+| `stage` | `stage` is `resolve`, `diff`, `prefilter`, `model`, `verify`, `branch_tests`. `status` is `start`, `done`, or `skipped`. `label` is short text. `detail` is optional. |
+| `branches` | `base_branch` and the branch names that will be scored. |
+| `pair` | A `PairRisk`, as soon as the git score is known, and again when the model, verify, or branch tests update it. The key is `branch_a` + `branch_b`. |
+| `result` | The full `AnalyzeResponse`. Always the last line on success. |
+| `error` | `detail` message if something fails after the stream has started. Last line. |
+| `ping` | Heartbeat at least every 10 seconds while a stage is quiet (verify can take minutes). |
+
+Every event has `t`, seconds since the stream started. CORS is the same middleware as the rest of the API.
+
+```bash
+curl -N -X POST http://localhost:8000/api/analyze/stream \
+  -H 'content-type: application/json' \
+  -d '{"repo_path": "/path/to/some/repo", "base_branch": "main"}'
+```
+
+### `POST /api/pair-diff`
+
+Body: `repo_path` or `repo_url`, optional `base_branch`, required `branch_a` and `branch_b`, optional `context` (default 3, max 100). Demo mode and repo resolution match `/api/analyze`, including GitHub pull request URLs.
+
+Response: `base_branch`, `branch_a`, `branch_b`, `merge_base_a`, `merge_base_b`, and `files`. Each file has `path`, `shared`, `overlapping`, and `a` / `b`. A side has `status` (`modified`, `added`, `deleted`, `unchanged`), `patch` (unified diff, empty when unchanged or binary), `hunks`, and `truncated`. A hunk has `old_start`, `old_lines`, `new_start`, `new_lines`, and `lines` of `{kind, old_no, new_no, text}` where `kind` is `context`, `add`, or `del`. Files both branches touch come first. The patch text is capped at about 200 KB (`truncated: true`). Binary files keep their status and have no lines.
+
+`overlapping` uses the same 3-line window as the git risk score.
+
+### GitHub URLs
+
+`repo_url` accepts `https://github.com/owner/repo`, `https://github.com/owner/repo.git`, and `https://github.com/owner/repo/pull/N`.
+
+A plain URL is cloned and scored from remote-tracking branches (`origin/*`), because a fresh clone only checks out the default branch. `origin/HEAD` and the base branch are left out.
+
+A pull request URL clones `https://github.com/owner/repo.git`, fetches that PR's head as local branch `pr-N`, and fetches up to 8 other open PRs that target the same base. The base branch is the PR's base, not the request's `base_branch`. The GitHub call is unauthenticated unless `GITHUB_TOKEN` is set. The token is sent as an HTTP header, never written into a clone URL, a log line, or an error `detail`.
+
+Passing `branches` still overrides the list. Generated intent tests and branch tests stay off for URL clones.
 
 ### Nemotron risk refinement
 
@@ -773,10 +818,10 @@ backend/            FastAPI service
     main.py         entrypoint + CORS
     config.py       env-driven settings (Nebius/Tavily keys)
     schemas.py      API models
-    api/routes.py   /api/health, /api/analyze, /api/resolve
+    api/routes.py   /api/health, /api/analyze, /api/analyze/stream, /api/pair-diff, /api/resolve, /api/plan, /api/repositories, GitHub routes
     services/
-      git_service.py  pure-git diff/branch helpers (subprocess)
-      github_service.py  open pull requests for seated authors (GitHub API)
+      git_service.py  pure-git diff/branch helpers (subprocess), PR ref fetch, pair diff, remote branches
+      github_service.py  open pull requests (GitHub API), repo and pull URL parsing
       nemotron.py     Token Factory chat-completions client (Nemotron 3 Super)
       docs_lookup.py  Tavily library-doc lookup for the risk and verify prompts
       prefilter.py    static symbol/call prefilter before any LLM call
@@ -786,6 +831,7 @@ backend/            FastAPI service
       branch_tests.py branch tests on merge (each branch's own tests on A+B, no LLM)
       js_tests.py     vitest/jest for branch tests: shared install per lockfile, minimal builds
       sentinel.py     conflict-risk scoring
+      planner.py      merge order from a Sentinel result (POST /api/plan)
       resolver.py     isolated merge proposals + Nebius/Tavily + validation
   tests/
 frontend/           React dashboard
@@ -796,3 +842,25 @@ docs/               customer discovery + notes
 
 Something is always on guard at the merge point — watching every in-flight
 branch so a conflict never lands as a surprise.
+
+### Repository browser and analysis history
+
+The dashboard's **Repositories & pull requests** panel reads bundled repositories
+and their real branch names from `GET /api/repositories`. Generate both demo repos
+using the commands in [demo/README.md](demo/README.md) before starting the backend.
+The GitHub queue reads `GET /api/github/pulls?repository=owner/repo&base_branch=main`;
+listing does not clone or analyze a repository. Choose **Analyze PR** to start a
+streamed comparison. Public repositories work without a token; private repositories
+require the existing backend `GITHUB_TOKEN`. Demo mode disables GitHub browsing.
+
+**Analysis history** keeps the last 12 completed results in this browser's local
+storage. Opening a record restores its saved verdict without a model call; its
+code diffs are fetched from current branch heads. The dated notice makes this
+clear. Use **Analyze** to check the repository again, or **Clear history** to erase
+saved records. Failed/cancelled runs are not stored. If browser storage is full or
+blocked, the dashboard reports that records will only survive for this session.
+
+For a second local stack, set `CORS_ALLOW_ORIGINS=http://127.0.0.1:3105` on the
+backend and `VITE_API_BASE_URL=http://127.0.0.1:8105` on the frontend, matching the
+ports passed to uvicorn and Vite. Fonts are self-hosted, with Azeret Mono used for
+code and tabular figures.

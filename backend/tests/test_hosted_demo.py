@@ -197,6 +197,7 @@ def test_demo_mode_leaves_health_unchanged(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
+    assert body["demo_mode"] is True
     assert body["nebius_ready"] is False
     assert "nebius_api_key" not in body
 

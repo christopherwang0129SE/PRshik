@@ -225,7 +225,8 @@ def test_plan_endpoint_calls_sentinel_when_no_analysis(
     monkeypatch.setattr(routes.settings, "default_base_branch", "main")
     monkeypatch.setattr(routes.settings, "demo_mode", False)
     monkeypatch.setattr(routes.git_service, "clone", lambda *a, **kw: tmp_path)
-    monkeypatch.setattr(routes.git_service, "list_branches", lambda *a, **kw: ["feat/x"])
+    monkeypatch.setattr(routes.git_service, "ref_exists", lambda *a, **kw: True)
+    monkeypatch.setattr(routes.git_service, "list_remote_branches", lambda *a, **kw: ["feat/x"])
     monkeypatch.setattr(routes.sentinel, "analyze", lambda *a, **kw: analysis)
     # Provide a fake repo_url so the route clones instead of looking up a local path.
     result = routes.plan(

@@ -26,8 +26,9 @@ still defaults to `http://localhost:8000`; `VITE_API_BASE_URL` is an optional bu
 override for separately hosted dashboards. Health check: `GET /api/health`.
 
 No authentication gate is installed. Demo mode allows only the two bundled
-repositories for analyze and resolve. Remote URLs and other paths return 403;
-`/api/github/pull-requests` and `/api/github/queue` return 403. No GitHub token,
+repositories for analyze, the analyze stream, pair diff, plan, and resolve.
+Remote URLs and other paths return 403. `/api/github/pull-requests`,
+`/api/github/queue`, and `/api/github/pulls` return 403. No GitHub token,
 Nebius key, or Tavily key is needed. Without model keys, deterministic branch
 tests still prove the checkout regression (200 instead of 198).
 
