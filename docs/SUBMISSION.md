@@ -1,4 +1,4 @@
-# MergeGuard: Devpost draft
+# PRshik: Devpost draft
 
 **Tagline:** Catch branches that merge cleanly but break together.
 
@@ -14,7 +14,7 @@ correct. Teams need evidence before integrating those changes.
 
 ## What it does
 
-MergeGuard compares in-flight branches and identifies risky pairs. It explains
+PRshik compares in-flight branches and identifies risky pairs. It explains
 potential semantic conflicts, then checks the combined checkout using the
 branches' own tests and model-generated intent tests. The dashboard shows the
 pair, risk level, pass/fail results per checkout, and the failing assertion.
