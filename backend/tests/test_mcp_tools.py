@@ -174,7 +174,15 @@ def test_outputs_never_contain_the_api_key(repo: Path) -> None:
 def test_no_key_note(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "nebius_api_key", "")
     out = tools.list_conflicting_branches(str(repo), analyzer=FakeEngine())
-    assert "git heuristic only" in out["note"]
+    assert "Nemotron scoring and generated intent tests are skipped" in out["note"]
+    assert "own tests still run on the merge and can confirm a conflict" in out["note"]
+
+
+def test_failed_model_note(repo: Path) -> None:
+    pair = _pair("feat/cap", "feat/tax", 10, "low", fallback_reason="model_error")
+    out = tools.check_merge_risk(str(repo), "feat/cap", analyzer=FakeEngine([pair]))
+    assert "Nemotron calls failed" in out["note"]
+    assert "can confirm a conflict" in out["note"]
 
 
 def test_engine_focus_scores_only_pairs_with_the_branch(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

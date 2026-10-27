@@ -16,7 +16,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import OpenAI, APIConnectionError, APITimeoutError
 
 from app.config import settings
 from app.schemas import BranchDiff, ChangedFile, FileCollision, PairRisk, RiskLevel
@@ -31,6 +31,26 @@ MAX_COLLISIONS = 8
 MAX_RATIONALE_CHARS = 500
 
 _LEVELS: set[str] = {"none", "low", "medium", "high"}
+
+# Only fixed messages are exposed by health; never retain exception bodies or headers.
+_last_call: tuple[str, str | None] = ("unchecked", None)
+
+
+def record_call_result(exc: BaseException | None = None) -> None:
+    global _last_call
+    if exc is None:
+        _last_call = ("ok", None)
+    elif getattr(exc, "status_code", None) in (401, 403):
+        _last_call = ("auth_failed", "Token Factory authentication failed")
+    elif isinstance(exc, (APIConnectionError, APITimeoutError, ConnectionError, TimeoutError)):
+        _last_call = ("unreachable", "Token Factory connection failed or timed out")
+    else:
+        _last_call = ("error", "Token Factory call failed")
+
+
+def operational_status() -> tuple[str, str | None]:
+    return _last_call if settings.nebius_ready else ("not_configured", None)
+
 
 SYSTEM_PROMPT = (
     "You score ONLY semantic breakage after both branches land and git merges "
@@ -176,16 +196,20 @@ def complete(
             ],
         )
     except NemotronError:
+        record_call_result(NemotronError("model_error"))
         raise
     except Exception as exc:
+        record_call_result(exc)
         raise NemotronError("model_error", _safe_detail(exc)) from exc
 
+    record_call_result()
     usage = getattr(completion, "usage", None)
     used = (
         int(getattr(usage, "prompt_tokens", 0) or 0),
         int(getattr(usage, "completion_tokens", 0) or 0),
     )
     if not completion.choices:
+        record_call_result(NemotronError("model_error"))
         raise NemotronError("model_error", "empty model response", *used)
     finish = getattr(completion.choices[0], "finish_reason", None)
     content = completion.choices[0].message.content
@@ -201,6 +225,7 @@ def complete(
                 parts.append(str(text) if text else "")
         content = "".join(parts)
     if not isinstance(content, str) or not content.strip():
+        record_call_result(NemotronError("model_error"))
         detail = "empty model response"
         if finish:
             detail += f" (finish_reason={finish})"

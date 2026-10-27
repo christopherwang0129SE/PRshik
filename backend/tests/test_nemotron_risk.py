@@ -133,6 +133,8 @@ def test_model_failure_and_garbage_use_git_score(
         assert pair.rationale == pair.git_rationale
     assert _res.risk_model is None
 
+    assert _res.usage.model_errors == len(failed)
+
     def garbage(_prompt: str) -> str:
         return "not json, just a hunch"
 
@@ -144,6 +146,8 @@ def test_model_failure_and_garbage_use_git_score(
         assert pair.score == pair.git_score
         assert pair.model_score is None
     assert _res.risk_model is None
+
+    assert _res.usage.model_errors == len(junk)
 
 
 def test_no_api_key_skips_the_model(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

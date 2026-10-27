@@ -227,6 +227,7 @@ class UsageSummary(BaseModel):
 
     model: str
     llm_calls: int = 0
+    model_errors: int = 0
     cache_hits: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0

@@ -31,7 +31,7 @@ from app.schemas import (
     ResolveRequest,
     ResolveResponse,
 )
-from app.services import git_service, github_service, planner, resolver, sentinel
+from app.services import git_service, github_service, planner, resolver, sentinel, nemotron
 
 router = APIRouter()
 
@@ -238,10 +238,13 @@ def _verify_allowed(req: AnalyzeRequest, repo: Path) -> bool:
 
 @router.get("/health")
 def health() -> dict:
+    model_status, last_error = nemotron.operational_status()
     return {
         "status": "ok",
         "demo_mode": settings.demo_mode,
         "nebius_ready": settings.nebius_ready,
+        "nebius_status": model_status,
+        "nebius_last_error": last_error,
         "nebius_enabled": settings.nebius_enabled,
         "nebius_model": settings.nebius_model,
         "model": settings.nebius_model,

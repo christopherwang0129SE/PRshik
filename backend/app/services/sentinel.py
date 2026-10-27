@@ -974,6 +974,7 @@ def analyze(
     usage = UsageSummary(
         **meter.summary_fields(),
         pairs_total=len(pairs),
+        model_errors=sum(p.fallback_reason in ("model_error", "unparsable") for p in pairs),
         pairs_prefiltered=sum(1 for p in pairs if not p.prefilter_candidate),
         pairs_sent_to_model=sum(1 for p in pairs if p.score_source == "model"),
         pairs_capped=sum(1 for p in pairs if p.fallback_reason == "pair_cap"),
