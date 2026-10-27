@@ -42,17 +42,6 @@ const FALLBACK_TEXT: Record<string, string> = {
   unparsable: 'the model answer was unreadable',
 };
 
-/** "raised: confirmed by test" + blended 44 -> "Raised from 44: confirmed by test". */
-const scoreNote = (pair: PairRisk): string => {
-  const note = pair.score_note ?? '';
-  const match = /^(raised|lowered):\s*(.*)$/i.exec(note);
-  if (match && pair.blended_score !== null && pair.blended_score !== undefined) {
-    const verb = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
-    return `${verb} from ${Math.round(pair.blended_score)}: ${match[2]}`;
-  }
-  return note;
-};
-
 /** Why the pair scored as it did, from the source that set the score. */
 const Explanation = ({ pair }: { pair: PairRisk }) => {
   const fromModel = pair.score_source === 'model';
@@ -182,7 +171,9 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
   };
   const branchesPass = outcome('a') === 'pass' && outcome('b') === 'pass';
   const caption = branchesPass && outcome('merge') === 'fail' && outcome('base') === 'fail';
-  const comparison = assertion?.match(/^(?:AssertionError:\s*)?(.+?)\s+!=\s+(.+)$/);
+  const literal = String.raw`(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|'(?:[^'\\\r\n]|\\.)*'|"(?:[^"\\\r\n]|\\.)*")`;
+  const comparison = assertion?.match(/^(?:AssertionError:\s*|assert\s+)?(.+?)\s+!=\s+(.+)$/)
+    ?? assertion?.match(new RegExp(`^assert\\s+(${literal})\\s+==\\s+(${literal})\\s*$`));
   const confirmedLine = branchesPass && outcome('merge') === 'fail'
     ? VERDICT_LINE.confirmed : 'A test confirms a failure on the merged code.';
   return (
@@ -199,9 +190,7 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
             <span className="pair-branch" title={pair.branch_b}><bdi>{pair.branch_b}</bdi></span>
           </span>
         </h2>
-        {verdict === 'confirmed' && pair.git_score != null && pair.git_score < 40 && pair.model_score != null && <p className="git-blind-callout">
-          Git heuristic: {Math.round(pair.git_score)}/100{pair.overlapping_files === 0 && !pair.branch_tests?.merge_conflict && !pair.verification?.merge_conflict ? ' (no overlapping hunks, merges cleanly)' : ' (low risk)'}. Nemotron: {Math.round(pair.model_score)}/100. The test on the merged code confirms it.
-        </p>}
+        <RiskGauge pair={pair} provisional={provisional} />
         <p className="detail-verdict">
           <span className="verdict-word">{awaitingVerdict ? 'Awaiting verdict' : VERDICT_TEXT[verdict]}</span>
           <span className="verdict-why">{awaitingVerdict ? 'Risk scoring and test checks are still running.' : verdict === 'confirmed' ? confirmedLine : VERDICT_LINE[verdict]}</span>
@@ -211,8 +200,9 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
 
       {proof && <section className="block proof-card" aria-label="Critical proof">
         <h3 className="block-title">{pair.verification ? "Nemotron's intent test, run on all four states" : assertion ? 'Branch test failed on A+B merge' : 'Static evidence'}</h3>
+        {comparison && <p className="proof-money">Merged code returns {comparison[1]} — expected {comparison[2]}.</p>}
         <div className="proof-strip">
-          {comparison && <div className="proof-comparison"><div><span>got</span><strong>{comparison[1]}</strong></div><span className="proof-not-equal">≠</span><div><span>expected</span><strong>{comparison[2]}</strong></div></div>}
+
           <code className="proof-assertion">{proof}</code>
         </div>
         {outcomes.length > 0 && <dl className="proof-matrix" aria-label="Verification run outcomes">
@@ -225,18 +215,7 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         {caption && <p className="proof-caption">Passes on each branch alone and fails on the merge; it also fails on the base, where neither change exists yet.</p>}
       </section>}
 
-      <div className="detail-top">
-        <Explanation pair={pair} />
-        <div className="detail-gauge">
-          <RiskGauge pair={pair} provisional={provisional} />
-          {provisional && <p className="gauge-note">Provisional {pair.model_score == null ? 'git ' : ''}score · tests running</p>}
-          {pair.score_note && (
-            <p className="gauge-note" data-testid="score-note">
-              {scoreNote(pair)}
-            </p>
-          )}
-        </div>
-      </div>
+      <Explanation pair={pair} />
 
       <details className="block changes-disclosure" open={changesOpen} onToggle={e => setChangesOpen(e.currentTarget.open)}>
         <summary>Show changes</summary>
@@ -265,17 +244,6 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         <BranchTestDetails branchTests={pair.branch_tests} branchA={pair.branch_a} branchB={pair.branch_b} />
       )}
       <DocsSources sources={docs} />
-      {verdict === 'confirmed' && [pair.branch_a, pair.branch_b].includes('feat/discount-cap') && [pair.branch_a, pair.branch_b].includes('feat/tax-before-discount') && (
-        <section className="block" aria-labelledby="suggestion-heading">
-          <h3 id="suggestion-heading" className="block-title">Suggested next step</h3>
-          <div className="block-body">
-            <p>Agree on whether the discount cap applies before or after tax. Keep the cap on the pre-tax subtotal, then apply tax, if preserving the discount branch’s contract.</p>
-            <p>Update the competing tax-order contract and rerun both branches’ tests together before merging.</p>
-            <p className="muted">Demo guidance for human review. This dashboard has no integrated planner or resolver and has not applied a fix.</p>
-            {gitOnly && <p>The resolver {NEEDS_NEBIUS_KEY}.</p>}
-          </div>
-        </section>
-      )}
       {advancedView() && <Cost pair={pair} usage={usage} />}
     </article>
   );

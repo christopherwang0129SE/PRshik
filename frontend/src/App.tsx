@@ -416,7 +416,7 @@ function App() {
 
           {(DEMO_REPO_PATH || API_DEMO_REPO_PATH) && (
             <div className="demos" role="group" aria-label="Bundled demos">
-              {DEMO_REPO_PATH && (
+              {DEMO_REPO_PATH && phase === 'idle' && (
                 <div className="demo">
                   <button
                     type="button"
@@ -482,6 +482,7 @@ function App() {
           setRepoInput(repo); setBaseBranch(base); runAnalysis(repo, base);
         }} />}
         {(advanced || history.length > 0) && <section className="library" aria-label="Analysis history">
+          {phase !== 'idle' && DEMO_REPO_PATH && <button type="button" className="btn demo-secondary" disabled={loading || (import.meta.env.PROD && !health)} onClick={() => handleTryDemo(DEMO_REPO_PATH)}>Try demo repo</button>}
           <details>
             <summary>Analysis history <span className="tabular">({history.length})</span></summary>
             <div className="library-body">
@@ -515,6 +516,7 @@ function App() {
         <div ref={pipelineRef} className="pipeline-slot">
           {showPipeline && (
             <Pipeline
+              model={response?.risk_model ?? response?.usage?.model}
               run={run}
               mode={pipelineMode}
               elapsedS={elapsed}

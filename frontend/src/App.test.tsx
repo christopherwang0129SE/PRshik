@@ -265,7 +265,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Try API demo (Tavily)' })).toHaveAccessibleDescription(/Tavily/);
     const pipeline = screen.getByTestId('pipeline');
     expect(within(pipeline).getByRole('heading', { name: 'How a run works' })).toBeInTheDocument();
-    expect(within(pipeline).getAllByRole('listitem')).toHaveLength(7);
+    expect(within(pipeline).getAllByRole('listitem').filter(item => !item.closest('details'))).toHaveLength(4);
     expect(await screen.findByText('Engine online')).toBeInTheDocument();
     expect(screen.getByText(/asks Nemotron which pairs interact/)).toBeInTheDocument();
     expect(screen.queryByText(/Git-only scores/)).not.toBeInTheDocument();

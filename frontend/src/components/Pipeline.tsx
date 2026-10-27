@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import type { RunState, StageProgress } from '../utils/run';
 import { formatClock, formatDuration, skippedModelDetail, stagesFor } from '../utils/run';
 
@@ -16,6 +16,7 @@ interface PipelineProps {
   onCancel?: () => void;
   /** Health says Nemotron is off. Model steps must not claim they will run. */
   gitOnly?: boolean;
+  model?: string | null;
 }
 
 const stateText = (stage: StageProgress, mode: PipelineMode): string => {
@@ -24,7 +25,7 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
       return 'running';
     case 'done':
       return stage.startedAt !== undefined && stage.endedAt !== undefined
-        ? formatDuration(stage.endedAt - stage.startedAt)
+        ? `✓ ${formatDuration(stage.endedAt - stage.startedAt)}`
         : 'done';
     case 'skipped':
       return 'skipped';
@@ -38,7 +39,13 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
  * reports them. Before a run it doubles as the explanation of what will
  * happen; after a run it keeps the time each stage took.
  */
-export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }: PipelineProps) => {
+export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, model }: PipelineProps) => {
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  const previousMode = useRef<PipelineMode>('idle');
+  useEffect(() => {
+    if (mode === 'finished' && previousMode.current !== 'finished' && disclosure.current) disclosure.current.open = true;
+    previousMode.current = mode;
+  }, [mode]);
   const running = mode === 'live' || mode === 'blind';
   const stages = stagesFor(gitOnly);
   const gitScored = run.pairs.some(p => p.git_score != null);
@@ -57,7 +64,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
               : stage.detail;
           return (
             <Fragment key={def.id}>
-            {def.id === 'model' && <li className="stage" data-state={gitScored ? 'done' : 'idle'} data-testid={compact ? undefined : "stage-git"}>
+            {mode === 'idle' && def.id === 'model' && <li className="stage" data-state={gitScored ? 'done' : 'idle'} data-testid={compact ? undefined : "stage-git"}>
               <span className="stage-bar" aria-hidden="true"></span>
               <span className="stage-title">Git score</span>
               {gitScored && <span className="stage-state">done</span>}
@@ -85,7 +92,15 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
           {mode === 'idle' ? 'How a run works' : 'Pipeline'}
         </h2>
       </div>
-      {renderStages(false)}
+      {mode === 'idle' ? <>
+        <ol className="pipeline-beats">{[
+          ['Find pairs', 'Static prefilter, no LLM'],
+          [gitOnly ? 'Git scores' : 'Nemotron scores & explains', gitOnly ? 'Model unavailable' : 'Review shared code'],
+          ['Prove by test on A, B, base, A+B', 'Compare test outcomes'],
+          ['Cost, cached', 'Report usage and cache hits'],
+        ].map(([title, description], i) => <li key={title}><span>{i + 1}</span><h3>{title}</h3><p>{description}</p></li>)}</ol>
+        <details><summary>Full pipeline</summary>{renderStages(false)}</details>
+      </> : renderStages(false)}
       {mode === 'blind' && (
         <p className="pipeline-note">
           This backend has no live progress stream, so stages show when the whole run finishes.
@@ -108,8 +123,9 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
         )}
         {renderStages(true)}
       </section>}
-      <details className="pipeline-history">
+      <details className="pipeline-history" ref={disclosure}>
         <summary>Run details <span>Pipeline stages and timings</span></summary>
+        {model && <p className="run-model mono">Model: {model}</p>}
         {content}
       </details>
     </>

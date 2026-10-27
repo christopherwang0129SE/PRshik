@@ -46,7 +46,7 @@ describe('PairDetail proof', () => {
     const reading = screen.getByRole('heading', { name: 'Nemotron’s reading' });
     const score = screen.getByTestId('risk-gauge');
     expect(matrix.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(reading.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(score.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/Passes on each branch alone/)).not.toBeInTheDocument();
     const verification = {
       status: 'confirmed' as const, reason: 'Recorded failure', attempts: 1, cached_test: false,
@@ -66,11 +66,10 @@ describe('PairDetail proof', () => {
     render(<PairDetail pair={{ ...pair, git_score: 10, model_score: 78,
       branch_tests: { ...pair.branch_tests!, confirming: [{ test_id: 'total', branch: 'a', file: 'test.py', excerpt: 'AssertionError: 200.0 != 198.0' }] },
     }} source={{ repo_path: '/repo' }} baseBranch="main" />);
-    expect(screen.getByText('got')).toBeInTheDocument();
-    expect(screen.getByText('expected')).toBeInTheDocument();
-    expect(screen.getByText('200.0')).toBeInTheDocument();
-    expect(screen.getByText('198.0')).toBeInTheDocument();
-    expect(screen.getByText(/Git heuristic: 10\/100/)).toHaveTextContent('Nemotron: 78/100');
+    expect(screen.getByText('Merged code returns 200.0 — expected 198.0.')).toBeVisible();
+    expect(screen.getByText('git heuristic 10 · Nemotron 78')).toBeVisible();
+    expect(screen.getByText('git: merges cleanly')).toBeVisible();
+    expect(screen.getAllByTestId('risk-gauge')).toHaveLength(1);
     expect(screen.queryByText('A test passes on each branch and fails once they are merged.')).not.toBeInTheDocument();
     expect(screen.queryByText(/Passes on each branch alone/)).not.toBeInTheDocument();
   });
@@ -81,7 +80,7 @@ describe('PairDetail proof', () => {
     const toggle = screen.getByText('Show changes');
     expect(toggle.closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('Long diff')).not.toBeVisible();
-    expect(screen.getByText('Provisional git score · tests running')).toBeInTheDocument();
+    expect(screen.getByText('/ 100 · provisional')).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(toggle.closest('details')).toHaveAttribute('open');
     expect(screen.getByText('Long diff')).toBeVisible();
@@ -99,4 +98,28 @@ describe('PairDetail proof', () => {
     expect(matrix).not.toHaveTextContent('PASS');
     expect(matrix.children).toHaveLength(1);
   });
+});
+
+it('does not invent an assertion caption or score explanation for expressions', () => {
+  render(<PairDetail pair={{ ...pair, branch_tests: { ...pair.branch_tests!, confirming: [{ test_id: 'total', branch: 'a', file: 'test.py', excerpt: 'E assert total(x) == 198.0' }] } }} source={{ repo_path: '/repo' }} baseBranch="main" />);
+  expect(screen.queryByText(/Merged code returns/)).not.toBeInTheDocument();
+  expect(screen.queryByText('git: merges cleanly')).not.toBeInTheDocument();
+  expect(screen.queryByText(/raised to|raised:/i)).not.toBeInTheDocument();
+});
+
+it('hides the clean-merge tag when a textual conflict is reported', () => {
+  render(<PairDetail pair={{ ...pair, git_score: 10, branch_tests: { ...pair.branch_tests!, merge_conflict: true } }} source={{ repo_path: '/repo' }} baseBranch="main" />);
+  expect(screen.queryByText('git: merges cleanly')).not.toBeInTheDocument();
+});
+
+it.each([
+  ['E assert 200.0 == 198.0', '200.0', '198.0'],
+  ["E assert 'actual' == 'expected'", "'actual'", "'expected'"],
+  ['E assert "actual" == "expected"', '"actual"', '"expected"'],
+  ['E assert 200.0 != 198.0', '200.0', '198.0'],
+])('captions evaluated literal comparisons: %s', (excerpt, got, expected) => {
+  render(<PairDetail pair={{ ...pair, branch_tests: { ...pair.branch_tests!, confirming: [
+    { test_id: 'total', branch: 'a', file: 'test.py', excerpt },
+  ] } }} source={{ repo_path: '/repo' }} baseBranch="main" />);
+  expect(screen.getByText(`Merged code returns ${got} — expected ${expected}.`)).toBeVisible();
 });

@@ -58,7 +58,7 @@ describe('reduceRun', () => {
       { type: 'result', result, t: 9 },
     ]);
     expect(run.pairs[0].score).toBe(90);
-    expect(run.stages.branch_tests).toMatchObject({ state: 'done', endedAt: 9 });
+    expect(run.stages.branch_tests).toMatchObject({ state: 'done', endedAt: undefined });
     expect(finishRun(initialRun(), result).baseBranch).toBe('main');
   });
 });
@@ -94,4 +94,10 @@ describe('clock and durations', () => {
     expect(formatDuration(12.4)).toBe('12s');
     expect(formatDuration(125)).toBe('2m 05s');
   });
+});
+
+it('does not invent a stage duration from a done event without a start', () => {
+  const run = reduceRun(initialRun(), { type: 'stage', stage: 'diff', status: 'done', label: 'Diffed', t: 3 });
+  expect(run.stages.diff.startedAt).toBeUndefined();
+  expect(run.stages.diff.endedAt).toBe(3);
 });
