@@ -41,13 +41,13 @@ describe('PairDetail proof', () => {
     } }} source={{ repo_path: '/repo' }} baseBranch="main" />);
     const matrix = screen.getByLabelText('Verification run outcomes');
     expect(Array.from(matrix.children).map(row => row.textContent)).toEqual([
-      'A onlyPASS', 'B onlyPASS', 'A+B merge← the semantic conflictFAIL', 'merge-base (before either branch)PASS',
+      'A onlyPASS', 'B onlyPASS', 'A+B mergeFAIL', 'merge-base (before either branch)PASS',
     ]);
     const reading = screen.getByRole('heading', { name: 'Nemotron’s reading' });
     const score = screen.getByTestId('risk-gauge');
     expect(matrix.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(score.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText(/expected — neither change exists on the base yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Passes on each branch alone/)).not.toBeInTheDocument();
     const verification = {
       status: 'confirmed' as const, reason: 'Recorded failure', attempts: 1, cached_test: false,
       merge_conflict: false, duration_s: 1, prompt_tokens: 0, completion_tokens: 0,
@@ -58,8 +58,7 @@ describe('PairDetail proof', () => {
       })),
     };
     rerender(<PairDetail pair={{ ...pair, verification }} source={{ repo_path: '/repo' }} baseBranch="main" />);
-    expect(screen.getByText('expected — neither change exists on the base yet')).toBeInTheDocument();
-    expect(screen.getByText('← the semantic conflict')).toBeInTheDocument();
+    expect(screen.getByText(/Passes on each branch alone/)).toBeInTheDocument();
     expect(screen.getByText('A test passes on each branch and fails once they are merged.')).toBeInTheDocument();
   });
 
@@ -68,11 +67,11 @@ describe('PairDetail proof', () => {
       branch_tests: { ...pair.branch_tests!, confirming: [{ test_id: 'total', branch: 'a', file: 'test.py', excerpt: 'AssertionError: 200.0 != 198.0' }] },
     }} source={{ repo_path: '/repo' }} baseBranch="main" />);
     expect(screen.getByText('Merged code returns 200.0 — expected 198.0.')).toBeVisible();
-    expect(screen.getByText(/^Signals: git heuristic 10\/100 · Nemotron 78\/100/)).toBeVisible();
+    expect(screen.getByText('git heuristic 10 · Nemotron 78')).toBeVisible();
     expect(screen.getByText('git: merges cleanly')).toBeVisible();
     expect(screen.getAllByTestId('risk-gauge')).toHaveLength(1);
     expect(screen.queryByText('A test passes on each branch and fails once they are merged.')).not.toBeInTheDocument();
-    expect(screen.queryByText(/expected — neither change exists on the base yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Passes on each branch alone/)).not.toBeInTheDocument();
   });
 
   it('collapses changes on narrow screens and opens by keyboard-accessible disclosure', () => {
