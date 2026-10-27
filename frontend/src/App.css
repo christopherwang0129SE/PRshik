@@ -2265,3 +2265,283 @@
   .pipeline-history .stage[data-state='done'] .stage-state,
   .run-stepper .stage[data-state='done'] .stage-state { color: #16a34a; }
 }
+
+/* ---------- Round 5: visible proof, calibrated score, quiet diagnostics ---------- */
+
+.summary {
+  padding-block: 0 16px;
+}
+
+.summary-target {
+  margin: 8px 0 0;
+}
+
+.summary-line {
+  margin: 0;
+  font-size: 28px;
+  line-height: 34px;
+}
+
+.summary-detail {
+  max-width: 65ch;
+}
+
+.summary .model-attribution {
+  justify-self: start;
+  margin-top: 0;
+}
+
+.workspace {
+  margin-top: 20px;
+}
+
+.pipeline-slot {
+  margin-block: 12px;
+}
+
+/* The run-level proof is deliberately a compact duplicate of the pair proof. */
+.summary-proof {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+}
+
+.summary-proof-label {
+  flex: 0 0 100%;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.summary-proof-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-proof-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: 500 12px/1 var(--sans);
+  white-space: nowrap;
+}
+
+.summary-proof-badge strong {
+  font-weight: 700;
+}
+
+.summary-proof-badge[data-outcome='pass'] {
+  color: #15803d;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.summary-proof-badge[data-outcome='fail'] {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.summary-proof-badge[data-expected='true'] {
+  color: #6b7280;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.summary-proof-money {
+  flex: 1 1 280px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #111827;
+  overflow-wrap: anywhere;
+}
+
+/* A labeled instrument rather than an unexplained red number. */
+.gauge-readout {
+  display: grid;
+  gap: 4px;
+  align-items: end;
+}
+
+.gauge-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+}
+
+.gauge-score-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.risk-legend {
+  font: 13px/1.5 var(--sans);
+  color: #374151;
+}
+
+.risk-track {
+  margin-top: 24px;
+}
+
+.risk-marker {
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: #111827;
+}
+
+.risk-value {
+  bottom: 16px;
+  padding: 0;
+  background: transparent;
+  color: #111827;
+  font: 500 11px/14px var(--sans);
+}
+
+/* Two-pixel tracks keep instantaneous stages from becoming visual dividers. */
+.stages .stage-bar {
+  height: 2px;
+  border-radius: 1px;
+  background: #e5e7eb;
+}
+
+.stages .stage[data-state='done'] .stage-bar {
+  background: #0f172a;
+}
+
+.stages .stage[data-state='running'] .stage-bar {
+  background: #e5e7eb;
+}
+
+.stages .stage[data-state='running'] .stage-bar::after {
+  background: #0f172a;
+}
+
+.stages .stage[data-instant='true'] .stage-title,
+.stages .stage[data-instant='true'] .stage-state {
+  color: #9ca3af;
+}
+
+.pipeline-live-note {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #374151;
+}
+
+.pipeline-live-note strong {
+  font-weight: 600;
+}
+
+.pipeline-history > summary {
+  gap: 10px;
+}
+
+.pipeline-history > summary span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty-state steps are numbered badges, not links. */
+.pipeline-beats li > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #eef2ff;
+  color: #3730a3;
+  font: 600 12px/20px var(--sans);
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Inline distinctions remove the apparent second alarm on the base row. */
+.proof-base {
+  opacity: 1;
+}
+
+.proof-matrix > div {
+  gap: 12px;
+}
+
+.proof-matrix dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.proof-matrix dd {
+  flex: none;
+}
+
+.proof-row-note {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.proof-merge-note {
+  color: #b91c1c;
+}
+
+.proof-base-note {
+  color: #6b7280;
+}
+
+.proof-matrix dd[data-expected='true'] {
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+}
+
+@media (max-width: 640px) {
+  .detail-head .gauge {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .detail-head .gauge .risk-track {
+    display: none;
+  }
+
+  .gauge-readout {
+    justify-self: start;
+  }
+
+  .risk-legend {
+    grid-column: 1 / -1;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .summary-proof-money {
+    flex-basis: 100%;
+  }
+
+  .pipeline-history .stages .stage-bar {
+    height: 2px;
+  }
+
+  .pipeline-history > summary span {
+    font-size: 11px;
+  }
+}

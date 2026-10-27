@@ -1,4 +1,4 @@
-import { keptRuns } from '../utils/verification';
+import { pairProof } from '../utils/proof';
 import { useState, type Ref } from 'react';
 import type { AnalyzeRequest, PairRisk, UsageSummary } from '../types';
 import { isFloorRule, isHiddenConflict, gitLevelFromScore, levelToText } from '../utils/risk';
@@ -154,27 +154,9 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
   const verdict = pairVerdict(pair);
   const awaitingVerdict = provisional && verdict === 'clean';
   const docs = usableDocs([...(pair.docs_sources ?? []), ...(pair.verification?.docs_sources ?? [])]);
-  const branchFailure = pair.branch_tests?.confirming[0];
-  const mergeRun = pair.verification?.runs.find(r => r.target === 'merge' && (r.failed > 0 || r.errors > 0));
-  const output = mergeRun?.output || branchFailure?.excerpt;
-  const lines = output?.split('\n') ?? [];
-  const failureLine = lines.find(line => /AssertionError:.* != /.test(line))
-    ?? lines.find(line => /^E\s+assert\s/.test(line.trim()))
-    ?? lines.find(line => /assert\s|AssertionError|Expected:|expected .* (?:to|but)/i.test(line));
-  const assertion = failureLine?.replace(/^(?:E\s+|>\s*)?\s*/, '').slice(0, 240) ?? output?.trim().slice(0, 240);
-  const proof = assertion || pair.static_breaks?.[0];
-  const outcomes = (pair.verification ? keptRuns(pair.verification) : pair.branch_tests?.runs ?? [])
-    .filter(r => !r.timed_out && r.exit_code !== null && r.errors === 0 && r.passed + r.failed > 0 && (r.failed > 0 || r.exit_code === 0));
-  const outcome = (target: string) => {
-    const run = outcomes.find(r => r.target === target);
-    return run ? (run.failed > 0 ? 'fail' : 'pass') : null;
-  };
-  const branchesPass = outcome('a') === 'pass' && outcome('b') === 'pass';
-  const caption = branchesPass && outcome('merge') === 'fail' && outcome('base') === 'fail';
-  const literal = String.raw`(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|'(?:[^'\\\r\n]|\\.)*'|"(?:[^"\\\r\n]|\\.)*")`;
-  const comparison = assertion?.match(/^(?:AssertionError:\s*|assert\s+)?(.+?)\s+!=\s+(.+)$/)
-    ?? assertion?.match(new RegExp(`^assert\\s+(${literal})\\s+==\\s+(${literal})\\s*$`));
-  const confirmedLine = branchesPass && outcome('merge') === 'fail'
+  const evidence = pairProof(pair);
+  const { proof, comparison } = evidence;
+  const confirmedLine = evidence.semanticConflict
     ? VERDICT_LINE.confirmed : 'A test confirms a failure on the merged code.';
   return (
     <article className="detail" data-verdict={awaitingVerdict ? 'pending' : verdict} aria-labelledby="detail-heading" data-testid="pair-detail">
@@ -199,20 +181,34 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
       </header>
 
       {proof && <section className="block proof-card" aria-label="Critical proof">
-        <h3 className="block-title">{pair.verification ? "Nemotron's intent test, run on all four states" : assertion ? 'Branch test failed on A+B merge' : 'Static evidence'}</h3>
-        {comparison && <p className="proof-money">Merged code returns {comparison[1]} — expected {comparison[2]}.</p>}
+        <h3 className="block-title">{pair.verification ? "Nemotron's intent test, run on all four states" : evidence.assertion ? 'Branch test failed on A+B merge' : 'Static evidence'}</h3>
+        {comparison && <p className="proof-money">Merged code returns {comparison.actual} — expected {comparison.expected}.</p>}
         <div className="proof-strip">
-
           <code className="proof-assertion">{proof}</code>
         </div>
-        {outcomes.length > 0 && <dl className="proof-matrix" aria-label="Verification run outcomes">
+        {Object.values(evidence.outcomes).some(Boolean) && <dl className="proof-matrix" aria-label="Verification run outcomes">
           {(['a', 'b', 'merge', 'base'] as const).map(target => {
-            const result = outcome(target);
+            const result = evidence.outcomes[target];
             if (!result) return null;
-            return <div key={target} className={target === 'base' ? 'proof-base' : undefined}><dt>{{ base: 'merge-base (before either branch)', a: 'A only', b: 'B only', merge: 'A+B merge' }[target]}</dt><dd data-outcome={result}>{result === 'fail' ? 'FAIL' : 'PASS'}</dd></div>;
+            const expectedBase = target === 'base' && evidence.baseExpected;
+            return (
+              <div key={target} className={target === 'base' ? 'proof-base' : undefined}>
+                <dt>
+                  <span>{{ base: 'merge-base (before either branch)', a: 'A only', b: 'B only', merge: 'A+B merge' }[target]}</span>
+                  {target === 'merge' && evidence.semanticConflict && (
+                    <span className="proof-row-note proof-merge-note">← the semantic conflict</span>
+                  )}
+                  {expectedBase && (
+                    <span className="proof-row-note proof-base-note">expected — neither change exists on the base yet</span>
+                  )}
+                </dt>
+                <dd data-outcome={result} data-expected={expectedBase ? 'true' : undefined}>
+                  {result === 'fail' ? 'FAIL' : 'PASS'}
+                </dd>
+              </div>
+            );
           })}
         </dl>}
-        {caption && <p className="proof-caption">Passes on each branch alone and fails on the merge; it also fails on the base, where neither change exists yet.</p>}
       </section>}
 
       <Explanation pair={pair} />
