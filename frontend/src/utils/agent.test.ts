@@ -30,14 +30,14 @@ describe('sentinelStatus', () => {
 describe('sentinelMode', () => {
   it('marks unchecked health as unverified even after a cached model result', () => {
     const health = { ...baseHealth, nebius_ready: true, nebius_enabled: true, nebius_status: 'unchecked' as const };
-    expect(sentinelMode(health)).toBe('git+Nemotron (unverified)');
-    expect(sentinelMode(health, [{ model_score: 20 } as PairRisk])).toBe('git+Nemotron (unverified)');
+    expect(sentinelMode(health)).toBe('git + Nemotron (unverified)');
+    expect(sentinelMode(health, [{ model_score: 20 } as PairRisk])).toBe('git + Nemotron (unverified)');
   });
   it('only degrades a failed run when no model score succeeded', () => {
     const health = { ...baseHealth, nebius_ready: true, nebius_enabled: true };
     const failed = { fallback_reason: 'unparsable', model_score: null } as PairRisk;
     expect(sentinelMode(health, [failed])).toBe('git only · Nemotron failed');
-    expect(sentinelMode(health, [failed, { model_score: 20 } as PairRisk])).toBe('git+Nemotron');
+    expect(sentinelMode(health, [failed, { model_score: 20 } as PairRisk])).toBe('git + Nemotron');
     expect(sentinelMode({ ...health, nebius_status: 'auth_failed' }, [{ model_score: 20 } as PairRisk])).toBe('git only · Nemotron failed');
   });
   it('is "git only" when Nebius is neither ready nor enabled', () => {
@@ -46,9 +46,9 @@ describe('sentinelMode', () => {
     );
   });
 
-  it('is "git+Nemotron" when nebius_ready is true', () => {
+  it('is "git + Nemotron" when nebius_ready is true', () => {
     expect(sentinelMode({ ...baseHealth, nebius_ready: true, nebius_enabled: true })).toBe(
-      'git+Nemotron'
+      'git + Nemotron'
     );
   });
 

@@ -32,6 +32,7 @@ class CachedAssessment:
     cached_at: float
     model: str
     prompt_version: str
+    llm_calls: int = 0
     # Absent on entries written before this field. ``get`` fills [].
     docs_sources: list[dict[str, str]] = field(default_factory=list)
 
@@ -97,6 +98,7 @@ def now() -> float:
 
 def from_payload(data: dict[str, Any], *, model: str) -> CachedAssessment:
     return CachedAssessment(
+        llm_calls=int(data.get("llm_calls", 0)),
         risk_score=float(data["risk_score"]),
         rationale=str(data["rationale"]),
         risk_level=data.get("risk_level"),

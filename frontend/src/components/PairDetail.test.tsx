@@ -24,8 +24,29 @@ describe('PairDetail proof', () => {
     expect(proof.previousElementSibling?.tagName).toBe('HEADER');
     expect(proof).toHaveTextContent('assert 200.0 == 198.0');
     expect(proof).toHaveTextContent('A+B merge');
-    expect(proof).toHaveTextContent(pair.rationale);
+    expect(proof).not.toHaveTextContent(pair.rationale);
+    expect(screen.getByText(pair.rationale)).toBeInTheDocument();
     expect(proof.compareDocumentPosition(screen.getByText('Long diff')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows the four recorded verification outcomes in checkout order', () => {
+    render(<PairDetail pair={{ ...pair, score_source: 'model', verification: {
+      status: 'confirmed', reason: 'Recorded test failure',
+      runs: (['merge', 'b', 'base', 'a'] as const).map(target => ({
+        target, ref: target, selection: '', exit_code: target === 'merge' ? 1 : 0,
+        passed: target === 'merge' ? 0 : 1, failed: target === 'merge' ? 1 : 0,
+        errors: 0, timed_out: false, duration_s: 1, output: '',
+      })), attempts: 1, cached_test: false, merge_conflict: false,
+      duration_s: 1, prompt_tokens: 0, completion_tokens: 0,
+    } }} source={{ repo_path: '/repo' }} baseBranch="main" />);
+    const matrix = screen.getByLabelText('Verification run outcomes');
+    expect(Array.from(matrix.children).map(row => row.textContent)).toEqual([
+      'BasePASS', 'A onlyPASS', 'B onlyPASS', 'A+B mergeFAIL',
+    ]);
+    const reading = screen.getByRole('heading', { name: 'Nemotron’s reading' });
+    const score = screen.getByTestId('risk-gauge');
+    expect(matrix.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reading.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('collapses changes on narrow screens and opens by keyboard-accessible disclosure', () => {
@@ -47,5 +68,9 @@ describe('PairDetail proof', () => {
       attempts: 1, cached_test: false, merge_conflict: false, duration_s: 1, prompt_tokens: 0, completion_tokens: 0,
     } }} source={{ repo_path: '/repo' }} baseBranch="main" />);
     expect(screen.getByRole('region', { name: 'Critical proof' })).toHaveTextContent('assert 42 == 40');
+    const matrix = screen.getByLabelText('Verification run outcomes');
+    expect(matrix).toHaveTextContent('A+B mergeFAIL');
+    expect(matrix).not.toHaveTextContent('PASS');
+    expect(matrix.children).toHaveLength(1);
   });
 });

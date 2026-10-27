@@ -29,13 +29,13 @@ export const RiskGauge = ({ pair, provisional = false }: RiskGaugeProps) => {
 
   return (
     <figure className="gauge" data-level={provisional ? 'pending' : pair.level} data-testid="risk-gauge">
+      <div className="gauge-label">Risk score</div>
       <div className="gauge-readout">
         <span className="gauge-num tabular" data-testid="gauge-score">
           {score}
         </span>
         <span className="gauge-unit">
-          <span className="gauge-level">{provisional ? 'Provisional' : `${levelToText(pair.level)} risk`}</span>
-          <span className="gauge-max">out of 100</span>
+          / 100 · {provisional ? 'provisional' : levelToText(pair.level).toLowerCase()}
         </span>
       </div>
       <div className="gauge-scale" aria-hidden="true">

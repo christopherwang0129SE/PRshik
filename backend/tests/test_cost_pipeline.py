@@ -242,7 +242,7 @@ def test_prefilter_drops_harmless_pairs_before_the_llm(
     assert res.usage.estimated_cost_usd == pytest.approx(0.0003 + 0.00018)
 
 
-def test_second_identical_run_makes_zero_llm_calls(
+def test_second_identical_run_uses_cache_with_zero_llm_calls(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
@@ -259,6 +259,11 @@ def test_second_identical_run_makes_zero_llm_calls(
     assert second.usage is not None
     assert second.usage.llm_calls == 0
     assert second.usage.cache_hits == 3
+    assert second.usage.cached_llm_calls == first.usage.llm_calls
+    assert second.usage.cached_tokens == first.usage.total_tokens
+    assert second.usage.cached_cost_usd == pytest.approx(first.usage.estimated_cost_usd)
+    assert second.usage.total_tokens == 0
+    assert second.usage.estimated_cost_usd == 0
     assert second.usage.total_tokens == 0
     assert second.usage.estimated_cost_usd == 0
     assert all(p.model_cached for p in second.pairs)
@@ -421,3 +426,27 @@ def test_static_checks_cover_every_call_site(tmp_path: Path) -> None:
     assert bad.verdict == "breaks"
     assert bad.detail == "call site bad.py:4 on use still passes removed ctx"
     assert checks[("area", "app.py")].verdict == "unknown"  # body-only change
+
+
+def test_usage_cache_hit_without_recorded_history_does_not_invent_calls():
+    from app.services.usage import UsageMeter
+    meter = UsageMeter()
+    meter.record_cache_hit()
+    assert meter.summary_fields()["cached_llm_calls"] == 0
+    assert meter.cached_tokens == 0
+    assert meter.cached_cost_usd == 0
+
+
+def test_cache_preserves_recorded_usage_and_call_count(tmp_path, monkeypatch):
+    from app.services import cache
+    monkeypatch.setattr(settings, "workspace_dir", str(tmp_path))
+    entry = cache.from_payload({"risk_score": 70, "rationale": "recorded", "llm_calls": 2,
+                               "prompt_tokens": 123, "completion_tokens": 45,
+                               "total_tokens": 168, "estimated_cost_usd": 0.123}, model="model")
+    cache.put("usage", entry)
+    assert cache.get("usage") == entry
+    old = json.loads((tmp_path / "nemotron-cache/usage.json").read_text())
+    del old["llm_calls"]
+    (tmp_path / "nemotron-cache/usage.json").write_text(json.dumps(old))
+    assert cache.get("usage").llm_calls == 0
+    assert cache.get("usage").total_tokens == 168

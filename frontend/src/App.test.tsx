@@ -176,9 +176,9 @@ describe('App', () => {
   it.each(['auth_failed', 'unreachable', 'error'])('shows a degraded banner for health %s', async status => {
     route('/api/health', () => Promise.resolve(jsonResponse({ ...HEALTH, nebius_status: status })));
     render(<App />);
-    expect(await screen.findByText(`Nemotron call failed (${status}). Scores fall back to git + branch tests.`)).toBeVisible();
+    expect(await screen.findByText(`Nemotron unavailable: ${status === 'auth_failed' ? 'Token Factory authentication failed.' : status === 'unreachable' ? 'Token Factory could not be reached.' : 'The model call failed.'} Scores fall back to git + branch tests.`)).toBeVisible();
     expect(screen.getByText('git only · Nemotron failed')).toBeVisible();
-    expect(screen.queryByText('git+Nemotron')).not.toBeInTheDocument();
+    expect(screen.queryByText('git + Nemotron')).not.toBeInTheDocument();
   });
 
   it.each(['model_error', 'unparsable'] as const)('degrades the current run after %s with no model score', async reason => {
@@ -188,11 +188,11 @@ describe('App', () => {
       usage: { ...RESULT.usage, llm_calls: 0, model_errors: 1 },
     })));
     render(<App />);
-    await screen.findByText('git+Nemotron (unverified)');
+    await screen.findByText('git + Nemotron (unverified)');
     fireEvent.click(screen.getByRole('button', { name: 'Try demo repo' }));
-    expect(await screen.findByText(`Nemotron call failed (${reason}). Scores fall back to git + branch tests.`)).toBeVisible();
+    expect(await screen.findByText('Nemotron unavailable: The model call failed. Scores fall back to git + branch tests.')).toBeVisible();
     expect(screen.getByText('git only · Nemotron failed')).toBeVisible();
-    expect(screen.queryByText('git+Nemotron')).not.toBeInTheDocument();
+    expect(screen.queryByText('git + Nemotron')).not.toBeInTheDocument();
   });
 
   it('restores browser history without rerunning the analysis and clears records', async () => {
@@ -206,7 +206,7 @@ describe('App', () => {
     expect(await screen.findByTestId('run-summary')).toBeInTheDocument();
     expect(screen.getByLabelText('Repository')).toHaveValue('/saved/demo');
     expect(screen.getByText(/Saved verdict from/)).toBeInTheDocument();
-    expect(screen.queryByTestId('pipeline')).not.toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Run stages' })).toBeVisible();
     expect(calls('/api/analyze/stream')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Clear history' }));
     expect(JSON.parse(localStorage.getItem('mergeguard.runs.v1')!)).toEqual([]);
@@ -215,7 +215,7 @@ describe('App', () => {
   it('keeps the default view focused on checkout and hides setup and empty history', async () => {
     window.history.replaceState(null, '', '/');
     render(<App />);
-    await screen.findByText('Sentinel online');
+    await screen.findByText('Engine online');
     expect(screen.getByRole('button', { name: 'Try demo repo' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Repository')).not.toBeInTheDocument();
     expect(screen.queryByText(/Analysis history/)).not.toBeInTheDocument();
@@ -265,7 +265,7 @@ describe('App', () => {
     const pipeline = screen.getByTestId('pipeline');
     expect(within(pipeline).getByRole('heading', { name: 'How a run works' })).toBeInTheDocument();
     expect(within(pipeline).getAllByRole('listitem')).toHaveLength(7);
-    expect(await screen.findByText('Sentinel online')).toBeInTheDocument();
+    expect(await screen.findByText('Engine online')).toBeInTheDocument();
     expect(screen.getByText(/asks Nemotron which pairs interact/)).toBeInTheDocument();
     expect(screen.queryByText(/Git-only scores/)).not.toBeInTheDocument();
     expect(screen.getByTestId('stage-model')).toHaveTextContent('Nemotron reads both diffs');

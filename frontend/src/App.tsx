@@ -328,7 +328,7 @@ function App() {
   const pending = loading ? Math.max(0, (run.branches.length * (run.branches.length - 1)) / 2 - run.pairs.length) : 0;
   const showWorkspace = target && (response || (loading && (run.pairs.length > 0 || run.branches.length > 1)));
   const pipelineMode = phase === 'idle' ? 'idle' : loading ? (streamed ? 'live' : 'blind') : 'finished';
-  const showPipeline = !restoredAt && (phase === 'idle' || loading || (streamed && phase !== 'error'));
+  const showPipeline = phase !== 'error';
 
   return (
     <div className="app">
@@ -507,9 +507,9 @@ function App() {
           {announcement}
         </p>
 
-        {failure && <p className="mode-note degraded-note" role="status">Nemotron call failed ({failure}). Scores fall back to git + branch tests.</p>}
+        {failure && <p className="mode-note degraded-note" role="status">Nemotron unavailable: {failure === 'auth_failed' ? 'Token Factory authentication failed.' : failure === 'unreachable' ? 'Token Factory could not be reached.' : 'The model call failed.'} Scores fall back to git + branch tests.</p>}
         {phase === 'done' && response && target && (
-          <RunSummary response={response} target={target.repo} headingRef={summaryRef} />
+          <RunSummary response={response} target={target.repo} headingRef={summaryRef} modelOk={health?.nebius_status === 'ok' && !failure} />
         )}
 
         <div ref={pipelineRef} className="pipeline-slot">

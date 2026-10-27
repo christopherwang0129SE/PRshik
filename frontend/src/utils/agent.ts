@@ -21,10 +21,10 @@ export function sentinelStatus(health: HealthResponse | null): 'online' | 'offli
  * Sentinel scoring mode. The git heuristic always runs; Nemotron is added on
  * top when Nebius is both configured and enabled.
  */
-export function sentinelMode(health: HealthResponse | null, pairs: PairRisk[] = []): 'git only' | 'git+Nemotron' | 'git+Nemotron (unverified)' | 'git only · Nemotron failed' {
+export function sentinelMode(health: HealthResponse | null, pairs: PairRisk[] = []): 'git only' | 'git + Nemotron' | 'git + Nemotron (unverified)' | 'git only · Nemotron failed' {
   if (modelFailure(health, pairs)) return 'git only · Nemotron failed';
   if (health && (health.nebius_ready && health.nebius_enabled)) {
-    return health.nebius_status === 'ok' ? 'git+Nemotron' : 'git+Nemotron (unverified)';
+    return health.nebius_status === 'ok' ? 'git + Nemotron' : 'git + Nemotron (unverified)';
   }
   return 'git only';
 }

@@ -73,16 +73,16 @@ describe('RiskGauge', () => {
     const pair = { ...PAIR, score: 10, level: 'low' as const, model_score: null };
     const { rerender } = render(<RiskGauge pair={pair} provisional />);
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'pending');
-    expect(screen.getByText('Provisional')).toBeInTheDocument();
+    expect(screen.getByText('/ 100 · provisional')).toBeInTheDocument();
     expect(screen.queryByText('Low risk')).not.toBeInTheDocument();
     rerender(<RiskGauge pair={pair} />);
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'low');
-    expect(screen.getByText('Low risk')).toBeInTheDocument();
+    expect(screen.getByText('/ 100 · low')).toBeInTheDocument();
   });
   it('shows the score large, the level, and both sub-scores for screen readers', () => {
     render(<RiskGauge pair={PAIR} />);
     expect(screen.getByTestId('gauge-score')).toHaveTextContent('90');
-    expect(screen.getByText('High risk')).toBeInTheDocument();
+    expect(screen.getByText('/ 100 · high')).toBeInTheDocument();
     expect(screen.getByText(/Risk score 90 out of 100/)).toHaveTextContent('git scored 10. Nemotron scored 78.');
   });
 
@@ -109,6 +109,17 @@ describe('Pipeline', () => {
     expect(screen.getByTestId('stage-model')).toHaveAttribute('data-state', 'done');
     expect(screen.getByTestId('stage-git')).toHaveAttribute('data-state', 'done');
   });
+  it('keeps the recorded model timing and done state in the visible stepper', () => {
+    const state = initialRun();
+    state.pairs = [PAIR];
+    state.stages.model = { state: 'done', startedAt: 2, endedAt: 5.5 };
+    render(<Pipeline run={state} mode="finished" />);
+    const stages = screen.getByRole('list', { name: 'Run stages' });
+    const model = within(stages).getByText('Nemotron').closest('li');
+    expect(model).toHaveAttribute('data-state', 'done');
+    expect(model).toHaveTextContent('3.5s');
+  });
+
   it('explains each stage before a run', () => {
     render(<Pipeline run={initialRun()} mode="idle" />);
     expect(screen.getByRole('heading', { name: 'How a run works' })).toBeInTheDocument();
@@ -118,6 +129,7 @@ describe('Pipeline', () => {
   it('folds completed progress so the verdict leads to the branch pairs', () => {
     render(<Pipeline run={initialRun()} mode="finished" />);
     const disclosure = screen.getByText('Run details').closest('details');
+    expect(screen.getByRole('list', { name: 'Run stages' })).toBeVisible();
     expect(disclosure).not.toHaveAttribute('open');
     expect(screen.getByTestId('pipeline')).not.toBeVisible();
     disclosure?.setAttribute('open', '');

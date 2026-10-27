@@ -166,6 +166,9 @@ export interface UsageSummary {
   model_errors?: number;
   model: string;
   llm_calls: number;
+  cached_llm_calls?: number;
+  cached_tokens?: number;
+  cached_cost_usd?: number;
   cache_hits: number;
   prompt_tokens: number;
   completion_tokens: number;

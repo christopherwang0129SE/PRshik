@@ -1,3 +1,4 @@
+import { keptRuns } from '../utils/verification';
 import { useState, type Ref } from 'react';
 import type { AnalyzeRequest, PairRisk, UsageSummary } from '../types';
 import { isFloorRule, isHiddenConflict, levelToText } from '../utils/risk';
@@ -196,10 +197,18 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
       {proof && <section className="block proof-card" aria-label="Critical proof">
         <h3 className="block-title">{assertion ? 'Test failed on A+B merge' : 'Static evidence'}</h3>
         <code className="proof-assertion">{proof}</code>
-        <p>{pair.model_rationale || pair.rationale}</p>
+        {pair.verification && <dl className="proof-matrix" aria-label="Verification run outcomes">
+          {(['base', 'a', 'b', 'merge'] as const).map(target => {
+            const run = keptRuns(pair.verification!).find(r => r.target === target);
+            if (!run || run.timed_out || run.exit_code === null || run.errors > 0 || run.passed + run.failed === 0 || (run.failed === 0 && run.exit_code !== 0)) return null;
+            const failed = run.failed > 0;
+            return <div key={target}><dt>{{ base: 'Base', a: 'A only', b: 'B only', merge: 'A+B merge' }[target]}</dt><dd data-outcome={failed ? 'fail' : 'pass'}>{failed ? 'FAIL' : 'PASS'}</dd></div>;
+          })}
+        </dl>}
       </section>}
 
       <div className="detail-top">
+        <Explanation pair={pair} />
         <div className="detail-gauge">
           <RiskGauge pair={pair} provisional={provisional} />
           {provisional && <p className="gauge-note">Provisional {pair.model_score == null ? 'git ' : ''}score · tests running</p>}
@@ -209,7 +218,6 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
             </p>
           )}
         </div>
-        <Explanation pair={pair} />
       </div>
 
       <details className="block changes-disclosure" open={changesOpen} onToggle={e => setChangesOpen(e.currentTarget.open)}>

@@ -9,7 +9,7 @@ interface AgentStatusProps {
 }
 
 /**
- * Header status for the backend: Sentinel online or offline (from
+ * Header status for the backend: Engine online or offline (from
  * /api/health), the scoring mode and whether Tavily is on. The model id
  * lives in the verdict and the footer.
  */
@@ -21,7 +21,7 @@ export const AgentStatus = ({ health, checked = true, pairs = [] }: AgentStatusP
     <div className="backend" data-status={status}>
       <span className="backend-state">
         <span className="backend-mark" aria-hidden="true"></span>
-        {status === 'checking' ? 'Checking backend' : status === 'online' ? 'Sentinel online' : 'Sentinel offline'}
+        {status === 'checking' ? 'Checking backend' : status === 'online' ? 'Engine online' : 'Engine offline'}
       </span>
       {status === 'online' && (
         <>
