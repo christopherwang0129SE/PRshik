@@ -68,7 +68,7 @@ describe('PairDetail proof', () => {
       branch_tests: { ...pair.branch_tests!, confirming: [{ test_id: 'total', branch: 'a', file: 'test.py', excerpt: 'AssertionError: 200.0 != 198.0' }] },
     }} source={{ repo_path: '/repo' }} baseBranch="main" />);
     expect(screen.getByText('Merged code returns 200.0 — expected 198.0.')).toBeVisible();
-    expect(screen.getByText(/^Signals: git heuristic 10\/100 · Nemotron 78\/100/)).toBeVisible();
+    expect(screen.getByText(/^Signals: git heuristic 10 · Nemotron 78/)).toBeVisible();
     expect(screen.getByText('git: merges cleanly')).toBeVisible();
     expect(screen.getAllByTestId('risk-gauge')).toHaveLength(1);
     expect(screen.queryByText('A test passes on each branch and fails once they are merged.')).not.toBeInTheDocument();

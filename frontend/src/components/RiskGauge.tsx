@@ -13,28 +13,35 @@ export const RiskGauge = ({ pair, provisional = false }: RiskGaugeProps) => {
   const wasRaised = /^raised:\s*/i.test(note);
   const noteBody = note.replace(/^raised:\s*/i, '').trim();
   const signals = [
-    pair.git_score != null ? `git heuristic ${Math.round(pair.git_score)}/100` : null,
-    pair.model_score != null ? `Nemotron ${Math.round(pair.model_score)}/100` : null,
+    pair.git_score != null ? `git heuristic ${Math.round(pair.git_score)}` : null,
+    pair.model_score != null ? `Nemotron ${Math.round(pair.model_score)}` : null,
   ].filter((signal): signal is string => signal !== null);
 
   let legend = '';
   if (signals.length > 0 || note) {
     legend = `Signals: ${signals.join(' · ')}`;
     if (note && wasRaised && score != null) {
-      const raised = `raised to ${score}/100${noteBody ? ` — ${noteBody}` : ''}`;
+      const raised = `raised to ${score}${noteBody ? ` — ${noteBody}` : ''}`;
       legend = signals.length > 0 ? `${legend} → ${raised}` : `Signals: ${raised}`;
     } else if (note) {
       legend += `${signals.length > 0 ? ' · ' : ''}${note}`;
     }
   }
 
+  const gitClean =
+    pair.git_score != null &&
+    pair.git_score < 40 &&
+    (pair.branch_tests?.merge_conflict === false || pair.verification?.merge_conflict === false) &&
+    pair.overlapping_files === 0 &&
+    !pair.branch_tests?.merge_conflict &&
+    !pair.verification?.merge_conflict;
+
   return (
     <figure className="gauge" data-level={provisional ? 'pending' : pair.level} data-testid="risk-gauge">
       {score != null && (
-        <div className="gauge-readout">
-          <span className="gauge-label">
-            RISK SCORE — {provisional ? 'PROVISIONAL' : level.toUpperCase()}
-          </span>
+        // The figcaption reads the same facts as one sentence.
+        <div className="gauge-readout" aria-hidden="true">
+          <span className="gauge-label">Risk score</span>
           <span className="gauge-score-line">
             <span className="gauge-num tabular" data-testid="gauge-score">{score}</span>
             <span className="gauge-unit">/ 100 · {provisional ? 'provisional' : level}</span>
@@ -50,13 +57,12 @@ export const RiskGauge = ({ pair, provisional = false }: RiskGaugeProps) => {
           </span>
         )}
       </div>
-      {legend && <p className="risk-legend">{legend}</p>}
-      {pair.git_score != null &&
-        pair.git_score < 40 &&
-        (pair.branch_tests?.merge_conflict === false || pair.verification?.merge_conflict === false) &&
-        pair.overlapping_files === 0 &&
-        !pair.branch_tests?.merge_conflict &&
-        !pair.verification?.merge_conflict && <span className="git-clean-tag">git: merges cleanly</span>}
+      {(legend || gitClean) && (
+        <div className="risk-signals">
+          {legend && <p className="risk-legend">{legend}</p>}
+          {gitClean && <span className="git-clean-tag">git: merges cleanly</span>}
+        </div>
+      )}
       <figcaption className="sr-only">
         {score != null &&
           `Risk score ${score} out of 100${provisional ? '; checks running' : `, ${level.toLowerCase()} risk`}.`}

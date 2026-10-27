@@ -71,7 +71,7 @@ const PAIR: PairRisk = {
 describe('RiskGauge', () => {
   it('omits missing score sources and keeps a real zero', () => {
     render(<RiskGauge pair={{ ...PAIR, git_score: null, model_score: 0 }} />);
-    expect(screen.getByText('Signals: Nemotron 0/100')).toBeInTheDocument();
+    expect(screen.getByText('Signals: Nemotron 0')).toBeInTheDocument();
     expect(screen.queryByText(/git heuristic/)).not.toBeInTheDocument();
   });
   it('keeps a pending low score neutral until checks finish', () => {
@@ -80,7 +80,7 @@ describe('RiskGauge', () => {
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'pending');
     expect(screen.getByText('/ 100 · provisional')).toBeInTheDocument();
     expect(screen.getByText('10 provisional')).toBeInTheDocument();
-    expect(screen.getByText('Signals: git heuristic 10/100')).toBeInTheDocument();
+    expect(screen.getByText('Signals: git heuristic 10')).toBeInTheDocument();
     expect(screen.queryByText('Low risk')).not.toBeInTheDocument();
     rerender(<RiskGauge pair={pair} />);
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'low');
@@ -90,7 +90,9 @@ describe('RiskGauge', () => {
     render(<RiskGauge pair={PAIR} />);
     expect(screen.getByTestId('gauge-score')).toHaveTextContent('90');
     expect(screen.getByText(/^\/ 100 · high$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^RISK SCORE — HIGH$/)).toBeInTheDocument();
+    // The level is said once, beside the number; the label only names the instrument.
+    expect(screen.getByText('Risk score')).toBeInTheDocument();
+    expect(screen.queryByText(/RISK SCORE — /)).not.toBeInTheDocument();
     expect(screen.getByText(/Risk score 90 out of 100/)).toHaveTextContent('git scored 10. Nemotron scored 78.');
   });
 
