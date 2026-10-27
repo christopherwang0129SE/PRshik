@@ -338,10 +338,7 @@ function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <a className="wordmark" href="/" aria-label="PRshik home">
-            <span className="wordmark-glyph" aria-hidden="true">
-              <span></span>
-              <span></span>
-            </span>
+            <img className="wordmark-icon" src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true" />
             PRshik
           </a>
           <AgentStatus health={health} pairs={pairs} checked={healthChecked && !(import.meta.env.PROD && !health)} />
