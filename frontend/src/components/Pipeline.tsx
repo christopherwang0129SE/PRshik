@@ -139,8 +139,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, m
         )}
         {renderStages(true)}
         {currentStage && (
-          // App's status region already announces each stage; this note stays visual.
-          <p className="pipeline-live-note">
+          <p className="pipeline-live-note" aria-live="polite">
             <strong>{currentStage.title} is running…</strong>{' '}
             {currentStageDetail || currentStage.about}
           </p>

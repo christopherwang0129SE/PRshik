@@ -435,13 +435,12 @@
   min-width: 0;
 }
 
-/* Two-pixel tracks keep instantaneous stages from becoming visual dividers. */
 .stage-bar {
   position: relative;
-  height: 2px;
+  height: 4px;
   margin-bottom: var(--s2);
   overflow: hidden;
-  border-radius: 1px;
+  border-radius: 2px;
   background: var(--rule);
 }
 
@@ -534,7 +533,6 @@
 }
 
 .summary-target {
-  margin: var(--s2) 0 0;
   font-size: var(--t-sm);
   color: var(--ink-2);
   overflow-wrap: anywhere;
@@ -628,7 +626,7 @@
   grid-template-columns: 296px minmax(0, 1fr);
   align-items: start;
   gap: var(--s5);
-  margin-top: 20px;
+  margin-top: var(--s5);
 }
 
 .index {
@@ -916,8 +914,9 @@
 }
 
 .gauge-readout {
-  display: grid;
-  gap: var(--s1);
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
 }
 
 .gauge-num {
@@ -2011,11 +2010,6 @@
 }
 
 .pipeline-history > summary span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 400;
   color: var(--ink-2);
 }
@@ -2085,10 +2079,13 @@
 .gauge-note { font-size: 12px; color: #6b7280; }
 .proof-assertion { font-family: var(--mono); font-size: 13px; }
 .proof-matrix { margin-top: 12px; }
-.proof-matrix > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 28px; border-top: 1px solid #e5e7eb; }
-.proof-matrix dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; font-size: 12px; }
+.proof-matrix > div { display: flex; justify-content: space-between; align-items: center; min-height: 28px; border-top: 1px solid #e5e7eb; }
+.proof-matrix dt { font-size: 12px; }
+.proof-matrix dd { font-size: 11px; font-weight: 600; }
+.proof-matrix [data-outcome='pass'] { color: #15803d; }
+.proof-matrix [data-outcome='fail'] { color: #b91c1c; }
 .model-attribution { font-size: 13px; color: #4b5563; margin-top: 8px; }
-.cache-caption { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; }
+.cache-caption { display: block; font-size: 11px; color: #9ca3af; font-weight: 400; }
 .pair-side, .row-branch { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 8px; max-width: 100%; min-width: 0; }
 .row-branch > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .row-branches { display: flex; flex-wrap: wrap; gap: 8px 16px; }
@@ -2120,10 +2117,10 @@
 .proof-comparison strong { font: 600 20px var(--mono); overflow-wrap: anywhere; }
 .proof-not-equal { color: #6b7280; }
 .proof-strip .proof-assertion { font: 12px var(--mono); color: #6b7280; overflow-wrap: anywhere; }
-.proof-matrix dd { flex: none; font-size: 10px; font-weight: 600; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; min-width: 44px; text-align: center; }
-/* Token fills keep the 10px pill text above 4.5:1 in both schemes. */
-.proof-matrix [data-outcome='pass'] { color: var(--surface); background: var(--pass); }
-.proof-matrix [data-outcome='fail'] { color: var(--surface); background: var(--fail); }
+.proof-matrix dd { font-size: 10px; font-weight: 600; color: white; padding: 2px 8px; border-radius: 999px; min-width: 44px; text-align: center; }
+.proof-matrix [data-outcome='pass'] { color: white; background: #16a34a; }
+.proof-matrix [data-outcome='fail'] { color: white; background: #dc2626; }
+.proof-base { opacity: .6; }
 .proof-caption, .explain-aside { font-size: 12px; color: #6b7280; }
 .git-blind-callout { background: #fffbeb; border-left: 3px solid #d97706; padding: 10px 14px; font-size: 13.5px; line-height: 1.5; color: #92400e; margin-block: 12px; }
 .sponsor-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: #4d7c0f; background: #f7fee7; border: 1px solid #d9f99d; border-radius: 999px; padding: 4px 12px; }
@@ -2133,6 +2130,7 @@
 .risk-value { position: absolute; bottom: 17px; left: 50%; transform: translateX(-50%); white-space: nowrap; font: 11px var(--mono); color: white; background: #111827; border-radius: 4px; padding: 1px 6px; }
 .risk-value[data-align='start'] { transform: none; }
 .risk-value[data-align='end'] { transform: translateX(-100%); }
+.risk-legend { font-size: 12px; color: #6b7280; margin-top: 8px; }
 .pair-branch, .branch-tail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .pair-branch bdi, .branch-tail bdi { direction: ltr; unicode-bidi: isolate; }
 @media (max-width: 640px) {
@@ -2142,10 +2140,10 @@
 }
 
 /* Round 3: compact recorded facts keep the test evidence near the verdict. */
-.summary { gap: 8px; padding-block: 0 16px; }
-.summary-line { margin: 0; font-size: 28px; line-height: 34px; max-width: 52ch; }
-.summary-detail { font-size: 16px; line-height: 1.6; color: #374151; max-width: 65ch; }
-.summary .figures { align-items: baseline; gap: 8px; min-height: 28px; margin: 4px 0 0; }
+.summary { gap: 8px; padding-bottom: 20px; }
+.summary-line { font-size: 30px; line-height: 38px; max-width: 52ch; }
+.summary-detail { font-size: 16px; line-height: 1.6; color: #374151; max-width: 68ch; }
+.summary .figures { align-items: baseline; gap: 8px; min-height: 28px; margin: 0; }
 .summary .figures > div { display: flex; align-items: baseline; gap: 6px; }
 .summary .figures > div + div::before { content: '·'; color: #6b7280; margin-right: 2px; }
 .summary .figures dt { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
@@ -2153,32 +2151,29 @@
 .library { display: flex; align-items: baseline; gap: 16px; margin-block: 20px; }
 .library > details { flex: 1; min-width: 0; }
 .demo-secondary { height: 32px; min-height: 32px; padding: 4px 12px; font-size: 13px; }
-.block, .explain { margin-block: 20px; }
-.pipeline-slot { margin-block: 12px; }
+.pipeline-slot, .block, .explain { margin-block: 20px; }
 .detail-head { padding-bottom: 12px; gap: 12px; }
 .proof-money { font-size: 14px; font-weight: 600; color: #111827; margin-block: 8px; overflow-wrap: anywhere; }
 .proof-strip { padding: 10px 12px; }
 .proof-strip .proof-assertion { font: 13px var(--mono); color: #991b1b; }
 .detail-head .gauge { grid-template-columns: auto minmax(80px, 1fr); gap: 8px 24px; align-items: center; margin: 0; }
+.gauge-readout { align-items: baseline; gap: 6px; }
 .gauge-num { font-size: 32px; font-weight: 700; letter-spacing: -.03em; line-height: 1.2; }
 .gauge[data-level='high'] .gauge-num { color: #dc2626; }
 .gauge-unit { font-size: 13px; color: #6b7280; }
-.risk-track { height: 6px; border-radius: 3px; margin-top: 24px; }
-.risk-marker { top: -3px; height: 12px; }
-.risk-value { bottom: 16px; background: transparent; color: var(--ink); padding: 0; border-radius: 0; font: 500 11px/14px var(--sans); }
-/* The git tag sits on the signals line it qualifies instead of on a row of its own. */
-.risk-signals { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-.risk-legend { font: 13px/1.5 var(--sans); color: var(--ink-2); margin: 0; }
-.git-clean-tag { flex: none; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; font-size: 11px; border-radius: 4px; padding: 2px 6px; }
+.risk-track { height: 6px; border-radius: 3px; margin-top: 16px; }
+.risk-marker { height: 10px; }
+.risk-value { bottom: 12px; background: transparent; color: #6b7280; padding: 0; border-radius: 0; }
+.risk-legend { grid-column: 1 / -1; font: 12px var(--mono); color: #6b7280; margin: 0; }
+.git-clean-tag { grid-column: 1 / -1; justify-self: start; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; font-size: 11px; border-radius: 4px; padding: 2px 6px; }
 .sponsor-chip { background: #ecfdf5; border-color: #bbf7d0; color: #065f46; }
 .sponsor-chip::before { background: #10b981; }
 .pipeline[data-mode='idle'] { border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; }
 .pipeline-beats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; list-style: none; padding: 0; margin-block: 16px; }
-/* Empty-state steps are numbered badges, not links. */
-.pipeline-beats li > span { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-wash); color: var(--accent); font: 600 12px/20px var(--sans); }
+.pipeline-beats li > span { font: 12px var(--mono); color: #2563eb; }
 .pipeline-beats h3 { font-size: 14px; font-weight: 600; color: #111827; margin-block: 6px; }
 .pipeline-beats p { font-size: 13px; color: #4b5563; }
-.stage[data-state='done'] .stage-state { color: var(--pass); }
+.stage[data-state='done'] .stage-state { color: #16a34a; }
 .run-stepper .stage[data-state='running'] .stage-bar { background: transparent; border: 2px solid #dbeafe; border-top-color: #2563eb; animation: stage-spin 1s linear infinite; }
 @keyframes stage-spin { to { transform: rotate(360deg); } }
 .run-model { font-size: 12px; overflow-wrap: anywhere; }
@@ -2222,6 +2217,7 @@
 
   .run-stepper .stage::after { display: none; }
 
+  .pipeline-history .stage-bar,
   .run-stepper .stage-bar {
     width: 100%;
     height: 4px;
@@ -2250,24 +2246,49 @@
   }
 
   .pipeline-history .stage[data-state='done'] .stage-state,
-  .run-stepper .stage[data-state='done'] .stage-state { color: var(--pass); }
+  .run-stepper .stage[data-state='done'] .stage-state { color: #16a34a; }
 }
 
 /* ---------- Round 5: visible proof, calibrated score, quiet diagnostics ---------- */
+
+.summary {
+  padding-block: 0 16px;
+}
+
+.summary-target {
+  margin: 8px 0 0;
+}
+
+.summary-line {
+  margin: 0;
+  font-size: 28px;
+  line-height: 34px;
+}
+
+.summary-detail {
+  max-width: 65ch;
+}
 
 .summary .model-attribution {
   justify-self: start;
   margin-top: 0;
 }
 
-/* The run-level proof is deliberately a compact duplicate of the pair proof:
-   label, then badges with the comparison beside them. */
+.workspace {
+  margin-top: 20px;
+}
+
+.pipeline-slot {
+  margin-block: 12px;
+}
+
+/* The run-level proof is deliberately a compact duplicate of the pair proof. */
 .summary-proof {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
-  margin-top: 4px;
+  gap: 8px;
+  margin: 4px 0 0;
 }
 
 .summary-proof-label {
@@ -2275,16 +2296,13 @@
   margin: 0;
   font-size: 12px;
   font-weight: 600;
-  color: var(--ink-2);
+  color: #374151;
 }
 
 .summary-proof-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: 8px;
 }
 
 .summary-proof-badge {
@@ -2303,44 +2321,47 @@
 }
 
 .summary-proof-badge[data-outcome='pass'] {
-  color: var(--pass);
-  background: var(--pass-wash);
-  border-color: color-mix(in srgb, var(--pass) 30%, transparent);
+  color: #15803d;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
 }
 
 .summary-proof-badge[data-outcome='fail'] {
-  color: var(--fail);
-  background: var(--fail-wash);
-  border-color: color-mix(in srgb, var(--fail) 30%, transparent);
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
 }
 
-/* Expected: outlined and dashed, so it reads as baseline without relying on grey alone. */
-.summary-proof-badge[data-expected='true'],
-.proof-matrix dd[data-expected='true'] {
-  color: var(--ink-2);
-  background: transparent;
-  border: 1px dashed var(--rule-strong);
+.summary-proof-badge[data-expected='true'] {
+  color: #6b7280;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
 }
 
 .summary-proof-money {
   flex: 1 1 280px;
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.5;
-  color: var(--ink);
+  color: #111827;
   overflow-wrap: anywhere;
 }
 
 /* A labeled instrument rather than an unexplained red number. */
+.gauge-readout {
+  display: grid;
+  gap: 4px;
+  align-items: end;
+}
+
 .gauge-label {
   display: block;
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+  color: #6b7280;
 }
 
 .gauge-score-line {
@@ -2349,25 +2370,112 @@
   gap: 6px;
 }
 
+.risk-legend {
+  font: 13px/1.5 var(--sans);
+  color: #374151;
+}
+
+.risk-track {
+  margin-top: 24px;
+}
+
+.risk-marker {
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: #111827;
+}
+
+.risk-value {
+  bottom: 16px;
+  padding: 0;
+  background: transparent;
+  color: #111827;
+  font: 500 11px/14px var(--sans);
+}
+
+/* Two-pixel tracks keep instantaneous stages from becoming visual dividers. */
+.stages .stage-bar {
+  height: 2px;
+  border-radius: 1px;
+  background: #e5e7eb;
+}
+
+.stages .stage[data-state='done'] .stage-bar {
+  background: #0f172a;
+}
+
+.stages .stage[data-state='running'] .stage-bar {
+  background: #e5e7eb;
+}
+
+.stages .stage[data-state='running'] .stage-bar::after {
+  background: #0f172a;
+}
+
 .stages .stage[data-instant='true'] .stage-title,
 .stages .stage[data-instant='true'] .stage-state {
-  color: var(--ink-2);
-  font-weight: 400;
+  color: #9ca3af;
 }
 
 .pipeline-live-note {
   margin: 14px 0 0;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--ink-2);
+  color: #374151;
 }
 
 .pipeline-live-note strong {
   font-weight: 600;
-  color: var(--ink);
+}
+
+.pipeline-history > summary {
+  gap: 10px;
+}
+
+.pipeline-history > summary span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty-state steps are numbered badges, not links. */
+.pipeline-beats li > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #eef2ff;
+  color: #3730a3;
+  font: 600 12px/20px var(--sans);
+  text-align: center;
+  text-decoration: none;
 }
 
 /* Inline distinctions remove the apparent second alarm on the base row. */
+.proof-base {
+  opacity: 1;
+}
+
+.proof-matrix > div {
+  gap: 12px;
+}
+
+.proof-matrix dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.proof-matrix dd {
+  flex: none;
+}
+
 .proof-row-note {
   font-size: 12px;
   font-weight: 400;
@@ -2375,11 +2483,17 @@
 }
 
 .proof-merge-note {
-  color: var(--fail);
+  color: #b91c1c;
 }
 
 .proof-base-note {
-  color: var(--ink-2);
+  color: #6b7280;
+}
+
+.proof-matrix dd[data-expected='true'] {
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
 }
 
 @media (max-width: 640px) {
@@ -2396,21 +2510,21 @@
     justify-self: start;
   }
 
+  .risk-legend {
+    grid-column: 1 / -1;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
   .summary-proof-money {
     flex-basis: 100%;
   }
 
-  /* The timing summary wraps under its label rather than truncating mid-word. */
-  .pipeline-history > summary {
-    flex-wrap: wrap;
-    row-gap: 2px;
-    padding-block: 10px;
+  .pipeline-history .stages .stage-bar {
+    height: 2px;
   }
 
   .pipeline-history > summary span {
-    flex-basis: 100%;
-    padding-left: calc(1ch + var(--s3));
-    font-size: 12px;
-    white-space: normal;
+    font-size: 11px;
   }
 }
