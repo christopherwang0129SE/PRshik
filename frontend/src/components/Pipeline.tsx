@@ -95,7 +95,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
   );
   return mode === 'idle' ? content : (
     <>
-      <section className="stepper-panel" aria-label="Pipeline progress">
+      {running && <section className="stepper-panel" aria-label="Pipeline progress">
         {running && (
           <div className="pipeline-head">
             <h2 className="pipeline-title">Analyzing</h2>
@@ -107,7 +107,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
           </div>
         )}
         {renderStages(true)}
-      </section>
+      </section>}
       <details className="pipeline-history">
         <summary>Run details <span>Pipeline stages and timings</span></summary>
         {content}

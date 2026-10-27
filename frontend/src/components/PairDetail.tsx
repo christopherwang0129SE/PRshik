@@ -1,7 +1,7 @@
 import { keptRuns } from '../utils/verification';
 import { useState, type Ref } from 'react';
 import type { AnalyzeRequest, PairRisk, UsageSummary } from '../types';
-import { isFloorRule, isHiddenConflict, levelToText } from '../utils/risk';
+import { isFloorRule, isHiddenConflict, gitLevelFromScore, levelToText } from '../utils/risk';
 import { VERDICT_TEXT, pairVerdict } from '../utils/verdict';
 import { usableDocs } from '../utils/docs';
 import { formatCost } from '../utils/usage';
@@ -63,16 +63,16 @@ const Explanation = ({ pair }: { pair: PairRisk }) => {
         {fromModel ? 'Nemotron’s reading' : 'Git heuristic'}
       </h3>
       <p className="explain-text">{text}</p>
-      {isHiddenConflict(pair) && pairVerdict(pair) !== 'confirmed' && (
+      {isHiddenConflict(pair) && pair.git_score != null && pairVerdict(pair) !== 'confirmed' && (
         <p className="explain-note">
           Nemotron rates this {pair.model_level} risk while the diff alone looks{' '}
-          {levelToText(pair.level).toLowerCase()}: a conflict git cannot see.
+          {(pair.git_score === 0 ? 'low' : levelToText(gitLevelFromScore(pair.git_score)).toLowerCase())}: a conflict git cannot see.
         </p>
       )}
       {isFloorRule(pair) && (
         <p className="explain-note">
-          Both branches edit the same lines, so the score stays at the git level ({Math.round(pair.git_score ?? 0)})
-          even though Nemotron scored it {Math.round(pair.model_score ?? 0)}.
+          Both branches edit the same lines, so the score stays at the git level ({Math.round(pair.git_score!)})
+          even though Nemotron scored it {Math.round(pair.model_score!)}.
         </p>
       )}
       {!fromModel && pair.fallback_reason && FALLBACK_TEXT[pair.fallback_reason] && (
@@ -167,44 +167,62 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
   const docs = usableDocs([...(pair.docs_sources ?? []), ...(pair.verification?.docs_sources ?? [])]);
   const branchFailure = pair.branch_tests?.confirming[0];
   const mergeRun = pair.verification?.runs.find(r => r.target === 'merge' && (r.failed > 0 || r.errors > 0));
-  const output = branchFailure?.excerpt ?? mergeRun?.output;
+  const output = mergeRun?.output || branchFailure?.excerpt;
   const lines = output?.split('\n') ?? [];
-  const failureLine = lines.find(line => /^E\s+assert\s/.test(line.trim()))
+  const failureLine = lines.find(line => /AssertionError:.* != /.test(line))
+    ?? lines.find(line => /^E\s+assert\s/.test(line.trim()))
     ?? lines.find(line => /assert\s|AssertionError|Expected:|expected .* (?:to|but)/i.test(line));
   const assertion = failureLine?.replace(/^(?:E\s+|>\s*)?\s*/, '').slice(0, 240) ?? output?.trim().slice(0, 240);
   const proof = assertion || pair.static_breaks?.[0];
+  const outcomes = (pair.verification ? keptRuns(pair.verification) : pair.branch_tests?.runs ?? [])
+    .filter(r => !r.timed_out && r.exit_code !== null && r.errors === 0 && r.passed + r.failed > 0 && (r.failed > 0 || r.exit_code === 0));
+  const outcome = (target: string) => {
+    const run = outcomes.find(r => r.target === target);
+    return run ? (run.failed > 0 ? 'fail' : 'pass') : null;
+  };
+  const branchesPass = outcome('a') === 'pass' && outcome('b') === 'pass';
+  const caption = branchesPass && outcome('merge') === 'fail' && outcome('base') === 'fail';
+  const comparison = assertion?.match(/^(?:AssertionError:\s*)?(.+?)\s+!=\s+(.+)$/);
+  const confirmedLine = branchesPass && outcome('merge') === 'fail'
+    ? VERDICT_LINE.confirmed : 'A test confirms a failure on the merged code.';
   return (
     <article className="detail" data-verdict={awaitingVerdict ? 'pending' : verdict} aria-labelledby="detail-heading" data-testid="pair-detail">
       <header className="detail-head">
         <h2 id="detail-heading" className="detail-pair" ref={headingRef} tabIndex={-1}>
           <span className="pair-side">
             <span className="side-key" aria-hidden="true">A</span>
-            <span className="pair-branch">{pair.branch_a}</span>
+            <span className="pair-branch" title={pair.branch_a}><bdi>{pair.branch_a}</bdi></span>
           </span>
           <span className="sr-only"> and </span>
           <span className="pair-side">
             <span className="side-key" aria-hidden="true">B</span>
-            <span className="pair-branch">{pair.branch_b}</span>
+            <span className="pair-branch" title={pair.branch_b}><bdi>{pair.branch_b}</bdi></span>
           </span>
         </h2>
+        {verdict === 'confirmed' && pair.git_score != null && pair.git_score < 40 && pair.model_score != null && <p className="git-blind-callout">
+          Git heuristic: {Math.round(pair.git_score)}/100{pair.overlapping_files === 0 && !pair.branch_tests?.merge_conflict && !pair.verification?.merge_conflict ? ' (no overlapping hunks, merges cleanly)' : ' (low risk)'}. Nemotron: {Math.round(pair.model_score)}/100. The test on the merged code confirms it.
+        </p>}
         <p className="detail-verdict">
           <span className="verdict-word">{awaitingVerdict ? 'Awaiting verdict' : VERDICT_TEXT[verdict]}</span>
-          <span className="verdict-why">{awaitingVerdict ? 'Risk scoring and test checks are still running.' : VERDICT_LINE[verdict]}</span>
+          <span className="verdict-why">{awaitingVerdict ? 'Risk scoring and test checks are still running.' : verdict === 'confirmed' ? confirmedLine : VERDICT_LINE[verdict]}</span>
         </p>
         {provisional && <p className="detail-provisional">Still running: this pair may change when the tests finish.</p>}
       </header>
 
       {proof && <section className="block proof-card" aria-label="Critical proof">
-        <h3 className="block-title">{assertion ? 'Test failed on A+B merge' : 'Static evidence'}</h3>
-        <code className="proof-assertion">{proof}</code>
-        {pair.verification && <dl className="proof-matrix" aria-label="Verification run outcomes">
-          {(['base', 'a', 'b', 'merge'] as const).map(target => {
-            const run = keptRuns(pair.verification!).find(r => r.target === target);
-            if (!run || run.timed_out || run.exit_code === null || run.errors > 0 || run.passed + run.failed === 0 || (run.failed === 0 && run.exit_code !== 0)) return null;
-            const failed = run.failed > 0;
-            return <div key={target}><dt>{{ base: 'Base', a: 'A only', b: 'B only', merge: 'A+B merge' }[target]}</dt><dd data-outcome={failed ? 'fail' : 'pass'}>{failed ? 'FAIL' : 'PASS'}</dd></div>;
+        <h3 className="block-title">{pair.verification ? "Nemotron's intent test, run on all four states" : assertion ? 'Branch test failed on A+B merge' : 'Static evidence'}</h3>
+        <div className="proof-strip">
+          {comparison && <div className="proof-comparison"><div><span>got</span><strong>{comparison[1]}</strong></div><span className="proof-not-equal">≠</span><div><span>expected</span><strong>{comparison[2]}</strong></div></div>}
+          <code className="proof-assertion">{proof}</code>
+        </div>
+        {outcomes.length > 0 && <dl className="proof-matrix" aria-label="Verification run outcomes">
+          {(['a', 'b', 'merge', 'base'] as const).map(target => {
+            const result = outcome(target);
+            if (!result) return null;
+            return <div key={target} className={target === 'base' ? 'proof-base' : undefined}><dt>{{ base: 'merge-base (before either branch)', a: 'A only', b: 'B only', merge: 'A+B merge' }[target]}</dt><dd data-outcome={result}>{result === 'fail' ? 'FAIL' : 'PASS'}</dd></div>;
           })}
         </dl>}
+        {caption && <p className="proof-caption">Passes on each branch alone and fails on the merge; it also fails on the base, where neither change exists yet.</p>}
       </section>}
 
       <div className="detail-top">

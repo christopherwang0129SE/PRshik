@@ -19,7 +19,7 @@ describe('RunSummary', () => {
     expect(within(figures).getByText('Nemotron calls').nextElementSibling).toHaveTextContent('3from cache');
     expect(within(figures).getByText('1,234 (cached)')).toBeVisible();
     expect(within(figures).getByText('$0.0123 (cached)')).toBeVisible();
-    expect(screen.getByText(/Risk scoring, explanations and intent tests by NVIDIA/)).toBeVisible();
+    expect(screen.getByText(/Scoring & intent tests: NVIDIA/)).toBeVisible();
   });
   it('keeps actual usage when this run made a call and gives fallback attribution', () => {
     render(<RunSummary response={{ ...response, usage: { ...usage, llm_calls: 1, total_tokens: 50, estimated_cost_usd: 0.001 } }} target="repo" />);

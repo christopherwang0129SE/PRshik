@@ -69,11 +69,18 @@ const PAIR: PairRisk = {
 };
 
 describe('RiskGauge', () => {
+  it('omits missing score sources and keeps a real zero', () => {
+    render(<RiskGauge pair={{ ...PAIR, git_score: null, model_score: 0 }} />);
+    expect(screen.getByText('Nemotron 0 · final 90')).toBeInTheDocument();
+    expect(screen.queryByText(/git heuristic/)).not.toBeInTheDocument();
+  });
   it('keeps a pending low score neutral until checks finish', () => {
     const pair = { ...PAIR, score: 10, level: 'low' as const, model_score: null };
     const { rerender } = render(<RiskGauge pair={pair} provisional />);
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'pending');
     expect(screen.getByText('/ 100 · provisional')).toBeInTheDocument();
+    expect(screen.getByText('10 provisional')).toBeInTheDocument();
+    expect(screen.getByText('git heuristic 10 · final 10')).toBeInTheDocument();
     expect(screen.queryByText('Low risk')).not.toBeInTheDocument();
     rerender(<RiskGauge pair={pair} />);
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'low');
@@ -114,7 +121,8 @@ describe('Pipeline', () => {
     state.pairs = [PAIR];
     state.stages.model = { state: 'done', startedAt: 2, endedAt: 5.5 };
     render(<Pipeline run={state} mode="finished" />);
-    const stages = screen.getByRole('list', { name: 'Run stages' });
+    fireEvent.click(screen.getByText('Run details'));
+    const stages = screen.getByTestId('pipeline');
     const model = within(stages).getByText('Nemotron').closest('li');
     expect(model).toHaveAttribute('data-state', 'done');
     expect(model).toHaveTextContent('3.5s');
@@ -129,7 +137,7 @@ describe('Pipeline', () => {
   it('folds completed progress so the verdict leads to the branch pairs', () => {
     render(<Pipeline run={initialRun()} mode="finished" />);
     const disclosure = screen.getByText('Run details').closest('details');
-    expect(screen.getByRole('list', { name: 'Run stages' })).toBeVisible();
+    expect(screen.queryByRole('list', { name: 'Run stages' })).not.toBeInTheDocument();
     expect(disclosure).not.toHaveAttribute('open');
     expect(screen.getByTestId('pipeline')).not.toBeVisible();
     disclosure?.setAttribute('open', '');

@@ -206,7 +206,8 @@ describe('App', () => {
     expect(await screen.findByTestId('run-summary')).toBeInTheDocument();
     expect(screen.getByLabelText('Repository')).toHaveValue('/saved/demo');
     expect(screen.getByText(/Saved verdict from/)).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Run stages' })).toBeVisible();
+    expect(screen.queryByRole('list', { name: 'Run stages' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Find branch pairs that merge cleanly and still break')).not.toBeInTheDocument();
     expect(calls('/api/analyze/stream')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Clear history' }));
     expect(JSON.parse(localStorage.getItem('mergeguard.runs.v1')!)).toEqual([]);
@@ -251,7 +252,7 @@ describe('App', () => {
 
   it('opens on the form, both demos and how a run works', async () => {
     render(<App />);
-    expect(screen.getByRole('banner')).toHaveTextContent('MergeGuard');
+    expect(screen.getByRole('banner')).toHaveTextContent('PRshik');
     expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#main');
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
       'Find branch pairs that merge cleanly and still break'

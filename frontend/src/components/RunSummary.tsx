@@ -41,7 +41,7 @@ export const RunSummary = ({ response, target, headingRef, modelOk = false }: Ru
         {summaryLine(pairs)}
       </h2>
       <p className="summary-detail">{verdict.detail}</p>
-      <p className="model-attribution">{modelOk ? 'Risk scoring, explanations and intent tests by NVIDIA Nemotron 3 Super on Nebius Token Factory' : 'Scores come from git + branch tests.'}</p>
+      <p className={modelOk ? "model-attribution sponsor-chip" : "model-attribution"}>{modelOk ? 'Scoring & intent tests: NVIDIA Nemotron 3 Super · Nebius Token Factory' : 'Scores come from git + branch tests.'}</p>
       <dl className="figures" data-testid="run-figures">
         {figures.map(([label, value]) => (
           <div key={label}>

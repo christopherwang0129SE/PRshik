@@ -337,12 +337,12 @@ function App() {
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-          <a className="wordmark" href="/" aria-label="MergeGuard home">
+          <a className="wordmark" href="/" aria-label="PRshik home">
             <span className="wordmark-glyph" aria-hidden="true">
               <span></span>
               <span></span>
             </span>
-            MergeGuard
+            PRshik
           </a>
           <AgentStatus health={health} pairs={pairs} checked={healthChecked && !(import.meta.env.PROD && !health)} />
         </div>
@@ -354,15 +354,15 @@ function App() {
             <strong>Git-only scores.</strong> This demo runs without a Nebius Token Factory key, so Nemotron and Tavily are off. Risk comes from git hunk overlap and the branch tests still run.
           </p>
         )}
-        <section className="intake" data-phase={phase} aria-labelledby="intake-heading">
-          <h1 id="intake-heading" className={phase === 'idle' ? 'intake-title' : 'intake-title is-compact'}>
+        <section className="intake" data-phase={phase} aria-label="Analyze branches">
+          {!response && pairs.length === 0 && <h1 id="intake-heading" className={phase === 'idle' ? 'intake-title' : 'intake-title is-compact'}>
             Find branch pairs that merge cleanly and still break
-          </h1>
+          </h1>}
           {phase === 'idle' && (
             <p className="intake-lede">
               {modelReady
-                ? 'MergeGuard diffs every branch against the base, asks Nemotron which pairs interact, and proves a conflict by running tests on the merged code.'
-                : 'MergeGuard diffs every branch against the base, scores pairs from git hunk overlap, and proves a conflict by running each branch\'s tests on the merged code.'}
+                ? 'PRshik diffs every branch against the base, asks Nemotron which pairs interact, and proves a conflict by running tests on the merged code.'
+                : 'PRshik diffs every branch against the base, scores pairs from git hunk overlap, and proves a conflict by running each branch\'s tests on the merged code.'}
             </p>
           )}
 
@@ -589,15 +589,16 @@ function App() {
           {gitOnly ? (
             <>
               Git scoring and branch tests run without a model. Using Nemotron, intent tests, the resolver, or Tavily
-              needs a Nebius key; not enabled in this demo. API at <code>{API_BASE_URL || window.location.origin}</code>.
+              needs a Nebius key; not enabled in this demo.
             </>
           ) : (
             <>
               Risk explanations and intent tests by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from
-              Tavily. API at <code>{API_BASE_URL || window.location.origin}</code>.
+              Tavily.
             </>
           )}
         </p>
+        {import.meta.env.DEV && <p>API at <code>{API_BASE_URL || window.location.origin}</code>.</p>}
       </footer>
     </div>
   );
