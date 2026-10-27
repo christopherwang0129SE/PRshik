@@ -69,6 +69,16 @@ const PAIR: PairRisk = {
 };
 
 describe('RiskGauge', () => {
+  it('keeps a pending low score neutral until checks finish', () => {
+    const pair = { ...PAIR, score: 10, level: 'low' as const, model_score: null };
+    const { rerender } = render(<RiskGauge pair={pair} provisional />);
+    expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'pending');
+    expect(screen.getByText('Provisional')).toBeInTheDocument();
+    expect(screen.queryByText('Low risk')).not.toBeInTheDocument();
+    rerender(<RiskGauge pair={pair} />);
+    expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'low');
+    expect(screen.getByText('Low risk')).toBeInTheDocument();
+  });
   it('shows the score large, the level, and both sub-scores for screen readers', () => {
     render(<RiskGauge pair={PAIR} />);
     expect(screen.getByTestId('gauge-score')).toHaveTextContent('90');
@@ -83,6 +93,22 @@ describe('RiskGauge', () => {
 });
 
 describe('Pipeline', () => {
+  it.each(['no_api_key', 'model_error', 'unparsable'] as const)('separates git scoring from %s', reason => {
+    const state = initialRun();
+    state.pairs = [{ ...PAIR, model_score: null, fallback_reason: reason }];
+    state.stages.model = { state: 'skipped' };
+    render(<Pipeline run={state} mode="live" gitOnly={reason === 'no_api_key'} />);
+    expect(screen.getByTestId('stage-git')).toHaveAttribute('data-state', 'done');
+    expect(screen.getByTestId('stage-model')).toHaveTextContent(reason === 'no_api_key' ? 'skipped (no key)' : 'failed');
+  });
+
+  it('shows a completed model stage separately', () => {
+    const state = initialRun();
+    state.pairs = [PAIR];
+    render(<Pipeline run={state} mode="live" />);
+    expect(screen.getByTestId('stage-model')).toHaveAttribute('data-state', 'done');
+    expect(screen.getByTestId('stage-git')).toHaveAttribute('data-state', 'done');
+  });
   it('explains each stage before a run', () => {
     render(<Pipeline run={initialRun()} mode="idle" />);
     expect(screen.getByRole('heading', { name: 'How a run works' })).toBeInTheDocument();

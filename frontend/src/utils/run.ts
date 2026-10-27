@@ -28,8 +28,7 @@ export const stagesFor = (gitOnly: boolean): StageDef[] => {
     if (stage.id === 'model') {
       return {
         ...stage,
-        title: 'Git score',
-        about: `Risk comes from git hunk overlap. Nemotron ${NEEDS_NEBIUS_KEY}.`,
+        about: `Nemotron ${NEEDS_NEBIUS_KEY}.`,
       };
     }
     if (stage.id === 'verify') {

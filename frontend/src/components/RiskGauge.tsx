@@ -3,6 +3,7 @@ import { levelToText } from '../utils/risk';
 
 interface RiskGaugeProps {
   pair: PairRisk;
+  provisional?: boolean;
 }
 
 const TICKS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -14,7 +15,7 @@ const clamp = (n: number) => Math.min(100, Math.max(0, n));
  * (40 medium, 70 high). The git heuristic and Nemotron's own score sit on
  * the same scale, so a disagreement between them is visible at a glance.
  */
-export const RiskGauge = ({ pair }: RiskGaugeProps) => {
+export const RiskGauge = ({ pair, provisional = false }: RiskGaugeProps) => {
   const score = Math.round(pair.score);
   const marks: Array<{ key: string; label: string; value: number }> = [];
   if (pair.git_score !== null && pair.git_score !== undefined) {
@@ -27,13 +28,13 @@ export const RiskGauge = ({ pair }: RiskGaugeProps) => {
   const collide = marks.length === 2 && Math.abs(marks[0].value - marks[1].value) < 12;
 
   return (
-    <figure className="gauge" data-level={pair.level} data-testid="risk-gauge">
+    <figure className="gauge" data-level={provisional ? 'pending' : pair.level} data-testid="risk-gauge">
       <div className="gauge-readout">
         <span className="gauge-num tabular" data-testid="gauge-score">
           {score}
         </span>
         <span className="gauge-unit">
-          <span className="gauge-level">{levelToText(pair.level)} risk</span>
+          <span className="gauge-level">{provisional ? 'Provisional' : `${levelToText(pair.level)} risk`}</span>
           <span className="gauge-max">out of 100</span>
         </span>
       </div>
@@ -71,7 +72,7 @@ export const RiskGauge = ({ pair }: RiskGaugeProps) => {
         </div>
       </div>
       <figcaption className="sr-only">
-        Risk score {score} out of 100, {levelToText(pair.level).toLowerCase()} risk.
+        {provisional ? `Provisional score ${score} out of 100; checks running.` : `Risk score ${score} out of 100, ${levelToText(pair.level).toLowerCase()} risk.`}
         {marks.map((m) => ` ${m.label} scored ${m.value}.`).join('')}
       </figcaption>
     </figure>

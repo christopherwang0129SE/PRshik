@@ -1,4 +1,4 @@
-import type { Ref } from 'react';
+import { useState, type Ref } from 'react';
 import type { AnalyzeRequest, PairRisk, UsageSummary } from '../types';
 import { isFloorRule, isHiddenConflict, levelToText } from '../utils/risk';
 import { VERDICT_TEXT, pairVerdict } from '../utils/verdict';
@@ -160,9 +160,18 @@ const Cost = ({ pair, usage }: { pair: PairRisk; usage?: UsageSummary | null }) 
  * side by side, the test evidence, the docs Nemotron read and what it cost.
  */
 export const PairDetail = ({ pair, source, baseBranch, usage, provisional = false, headingRef, gitOnly = false }: PairDetailProps) => {
+  const [changesOpen, setChangesOpen] = useState(() => !window.matchMedia?.('(max-width: 640px)').matches);
   const verdict = pairVerdict(pair);
   const awaitingVerdict = provisional && verdict === 'clean';
   const docs = usableDocs([...(pair.docs_sources ?? []), ...(pair.verification?.docs_sources ?? [])]);
+  const branchFailure = pair.branch_tests?.confirming[0];
+  const mergeRun = pair.verification?.runs.find(r => r.target === 'merge' && (r.failed > 0 || r.errors > 0));
+  const output = branchFailure?.excerpt ?? mergeRun?.output;
+  const lines = output?.split('\n') ?? [];
+  const failureLine = lines.find(line => /^E\s+assert\s/.test(line.trim()))
+    ?? lines.find(line => /assert\s|AssertionError|Expected:|expected .* (?:to|but)/i.test(line));
+  const assertion = failureLine?.replace(/^(?:E\s+|>\s*)?\s*/, '').slice(0, 240) ?? output?.trim().slice(0, 240);
+  const proof = assertion || pair.static_breaks?.[0];
   return (
     <article className="detail" data-verdict={awaitingVerdict ? 'pending' : verdict} aria-labelledby="detail-heading" data-testid="pair-detail">
       <header className="detail-head">
@@ -184,9 +193,16 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         {provisional && <p className="detail-provisional">Still running: this pair may change when the tests finish.</p>}
       </header>
 
+      {proof && <section className="block proof-card" aria-label="Critical proof">
+        <h3 className="block-title">{assertion ? 'Test failed on A+B merge' : 'Static evidence'}</h3>
+        <code className="proof-assertion">{proof}</code>
+        <p>{pair.model_rationale || pair.rationale}</p>
+      </section>}
+
       <div className="detail-top">
         <div className="detail-gauge">
-          <RiskGauge pair={pair} />
+          <RiskGauge pair={pair} provisional={provisional} />
+          {provisional && <p className="gauge-note">Provisional {pair.model_score == null ? 'git ' : ''}score · tests running</p>}
           {pair.score_note && (
             <p className="gauge-note" data-testid="score-note">
               {scoreNote(pair)}
@@ -196,7 +212,8 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         <Explanation pair={pair} />
       </div>
 
-      <section className="block" aria-labelledby="diff-heading">
+      <details className="block changes-disclosure" open={changesOpen} onToggle={e => setChangesOpen(e.currentTarget.open)}>
+        <summary>Show changes</summary>
         <h3 id="diff-heading" className="block-title">
           Both diffs <span className="block-sub">against {baseBranch}, lined up on the base file</span>
         </h3>
@@ -204,7 +221,7 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
           <Symbols pair={pair} />
           <PairDiff source={source} baseBranch={baseBranch} branchA={pair.branch_a} branchB={pair.branch_b} />
         </div>
-      </section>
+      </details>
 
       {pair.verification ? (
         <VerificationDetails verification={pair.verification} branchA={pair.branch_a} branchB={pair.branch_b} />

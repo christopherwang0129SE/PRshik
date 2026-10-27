@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import type { RunState, StageProgress } from '../utils/run';
 import { formatClock, formatDuration, skippedModelDetail, stagesFor } from '../utils/run';
 
@@ -40,6 +41,7 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
 export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }: PipelineProps) => {
   const running = mode === 'live' || mode === 'blind';
   const stages = stagesFor(gitOnly);
+  const gitScored = run.pairs.some(p => p.git_score != null);
   const content = (
     <section className="pipeline" data-mode={mode} aria-labelledby="pipeline-heading" data-testid="pipeline">
       <div className="pipeline-head">
@@ -63,13 +65,24 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
       <ol className="stages">
         {stages.map((def) => {
           const stage = run.stages[def.id];
-          const text = stateText(stage, mode);
+          const modelFailed = def.id === 'model' && run.pairs.some(p => p.fallback_reason === 'model_error' || p.fallback_reason === 'unparsable');
+          const modelDone = def.id === 'model' && stage.state !== 'running' && run.pairs.some(p => p.model_score != null);
+          const noKeySkipped = def.id === 'model' && gitOnly && (mode === 'finished' || stage.state === 'skipped' || run.pairs.length > 0);
+          const state = modelFailed ? 'failed' : modelDone ? 'done' : noKeySkipped ? 'skipped' : stage.state;
+          const text = modelFailed ? 'failed' : modelDone ? 'done' : noKeySkipped ? 'skipped (no key)' : stateText(stage, mode);
           const detail =
-            gitOnly && stage.state === 'skipped' && (def.id === 'model' || def.id === 'verify')
+            gitOnly && state === 'skipped' && (def.id === 'model' || def.id === 'verify')
               ? skippedModelDetail(def.id, stage.detail)
               : stage.detail;
           return (
-            <li key={def.id} className="stage" data-state={stage.state} data-testid={`stage-${def.id}`}>
+            <Fragment key={def.id}>
+            {def.id === 'model' && <li className="stage" data-state={gitScored ? 'done' : 'idle'} data-testid="stage-git">
+              <span className="stage-bar" aria-hidden="true"></span>
+              <span className="stage-title">Git score</span>
+              {gitScored && <span className="stage-state">done</span>}
+              {mode === 'idle' && <span className="stage-about">Scores git hunk overlap for every pair.</span>}
+            </li>}
+            <li className="stage" data-state={state} data-testid={`stage-${def.id}`}>
               <span className="stage-bar" aria-hidden="true"></span>
               <span className="stage-title">{def.title}</span>
               {text && <span className="stage-state tabular">{text}</span>}
@@ -79,6 +92,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
                 detail && <span className="stage-detail">{detail}</span>
               )}
             </li>
+            </Fragment>
           );
         })}
       </ol>

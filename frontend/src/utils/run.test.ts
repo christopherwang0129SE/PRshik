@@ -73,8 +73,8 @@ describe('stagesFor', () => {
   it('does not claim Nemotron will score in git-only mode', () => {
     const stages = stagesFor(true);
     expect(stages.find((stage) => stage.id === 'model')).toMatchObject({
-      title: 'Git score',
-      about: 'Risk comes from git hunk overlap. Nemotron needs a Nebius key; not enabled in this demo.',
+      title: 'Nemotron',
+      about: 'Nemotron needs a Nebius key; not enabled in this demo.',
     });
     expect(stages.find((stage) => stage.id === 'verify')?.about).toBe(
       'Intent test generation needs a Nebius key; not enabled in this demo. Branch tests still run.'

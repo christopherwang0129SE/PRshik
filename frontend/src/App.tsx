@@ -5,7 +5,7 @@ import { analyzeStream, StreamUnavailableError } from './services/stream';
 import { classifyRepoInput } from './utils/repo';
 import { describeError, BACKEND_START_COMMAND } from './utils/errors';
 import { rankPairs, summaryLine } from './utils/verdict';
-import { sentinelMode } from './utils/agent';
+import { modelFailure } from './utils/agent';
 import { activeStage, finishRun, formatClock, initialRun, pairKey, reduceRun } from './utils/run';
 import type { RunState } from './utils/run';
 import { formatHash, parseHash } from './utils/hash';
@@ -319,10 +319,11 @@ function App() {
   };
 
   const backendOffline = healthChecked && !health;
-  const gitOnly = health !== null && sentinelMode(health) === 'git only';
-  const modelReady = health !== null && !gitOnly;
+  const gitOnly = health !== null && !(health.nebius_ready && health.nebius_enabled);
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
   const pairs = response?.pairs ?? run.pairs;
+  const failure = modelFailure(health, pairs);
+  const modelReady = health !== null && !gitOnly && !failure;
   const selected = pairs.find((p) => pairKey(p) === selectedKey) ?? null;
   const pending = loading ? Math.max(0, (run.branches.length * (run.branches.length - 1)) / 2 - run.pairs.length) : 0;
   const showWorkspace = target && (response || (loading && (run.pairs.length > 0 || run.branches.length > 1)));
@@ -343,7 +344,7 @@ function App() {
             </span>
             MergeGuard
           </a>
-          <AgentStatus health={health} checked={healthChecked && !(import.meta.env.PROD && !health)} />
+          <AgentStatus health={health} pairs={pairs} checked={healthChecked && !(import.meta.env.PROD && !health)} />
         </div>
       </header>
 
@@ -506,6 +507,7 @@ function App() {
           {announcement}
         </p>
 
+        {failure && <p className="mode-note degraded-note" role="status">Nemotron call failed ({failure}). Scores fall back to git + branch tests.</p>}
         {phase === 'done' && response && target && (
           <RunSummary response={response} target={target.repo} headingRef={summaryRef} />
         )}
@@ -553,7 +555,7 @@ function App() {
                   source={target.source}
                   baseBranch={response?.base_branch ?? run.baseBranch ?? target.base}
                   usage={response?.usage ?? null}
-                  provisional={loading}
+                  provisional={loading && !(selected.branch_tests && (selected.verification || ['done', 'skipped'].includes(run.stages.verify.state)))}
                   headingRef={detailRef}
                   gitOnly={gitOnly}
                 />

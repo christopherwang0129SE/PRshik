@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { sentinelStatus, sentinelMode } from './agent';
-import type { HealthResponse } from '../types';
+import type { HealthResponse, PairRisk } from '../types';
 
 const baseHealth: HealthResponse = {
   status: 'ok',
@@ -27,6 +27,13 @@ describe('sentinelStatus', () => {
 });
 
 describe('sentinelMode', () => {
+  it('only degrades a failed run when no model score succeeded', () => {
+    const health = { ...baseHealth, nebius_ready: true, nebius_enabled: true };
+    const failed = { fallback_reason: 'unparsable', model_score: null } as PairRisk;
+    expect(sentinelMode(health, [failed])).toBe('git only · Nemotron failed');
+    expect(sentinelMode(health, [failed, { model_score: 20 } as PairRisk])).toBe('git+Nemotron');
+    expect(sentinelMode({ ...health, nebius_status: 'auth_failed' }, [{ model_score: 20 } as PairRisk])).toBe('git only · Nemotron failed');
+  });
   it('is "git only" when Nebius is neither ready nor enabled', () => {
     expect(sentinelMode({ ...baseHealth, nebius_ready: false, nebius_enabled: false })).toBe(
       'git only'

@@ -1,4 +1,13 @@
-import type { HealthResponse } from '../types';
+import type { HealthResponse, PairRisk } from '../types';
+
+export function modelFailure(health: HealthResponse | null, pairs: PairRisk[] = []): string | null {
+  if (['auth_failed', 'unreachable', 'error'].includes(health?.nebius_status ?? '')) {
+    return health!.nebius_status!;
+  }
+  const failures = pairs.filter(p => p.fallback_reason === 'model_error' || p.fallback_reason === 'unparsable');
+  const succeeded = pairs.some(p => p.model_score != null);
+  return failures.length && !succeeded ? failures[0].fallback_reason! : null;
+}
 
 /**
  * Sentinel is "online" whenever /api/health responds, because the git-based
@@ -12,7 +21,8 @@ export function sentinelStatus(health: HealthResponse | null): 'online' | 'offli
  * Sentinel scoring mode. The git heuristic always runs; Nemotron is added on
  * top when Nebius is both configured and enabled.
  */
-export function sentinelMode(health: HealthResponse | null): 'git only' | 'git+Nemotron' {
+export function sentinelMode(health: HealthResponse | null, pairs: PairRisk[] = []): 'git only' | 'git+Nemotron' | 'git only · Nemotron failed' {
+  if (modelFailure(health, pairs)) return 'git only · Nemotron failed';
   if (health && (health.nebius_ready && health.nebius_enabled)) {
     return 'git+Nemotron';
   }
