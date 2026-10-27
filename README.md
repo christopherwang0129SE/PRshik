@@ -14,10 +14,10 @@ To enable that path locally, copy `.env.example` to `backend/.env`, set `NEBIUS_
 
 ## Public hosting on Render (free)
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard/tree/hosting-setup)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/christopherwang0129SE/mergeguard)
 
 Dima: click **Deploy to Render**, sign in to your existing Render account, select
-`hosting-setup` if prompted, and apply the Blueprint. Open the service's public
+`main` if prompted, and apply the Blueprint. Open the service's public
 `https://<service>.onrender.com` URL and click **Try demo repo**. Judges need no
 login, API key, or local setup. No account or deployment is created by this repo.
 
