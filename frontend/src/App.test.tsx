@@ -188,7 +188,7 @@ describe('App', () => {
       usage: { ...RESULT.usage, llm_calls: 0, model_errors: 1 },
     })));
     render(<App />);
-    await screen.findByText('git+Nemotron');
+    await screen.findByText('git+Nemotron (unverified)');
     fireEvent.click(screen.getByRole('button', { name: 'Try demo repo' }));
     expect(await screen.findByText(`Nemotron call failed (${reason}). Scores fall back to git + branch tests.`)).toBeVisible();
     expect(screen.getByText('git only · Nemotron failed')).toBeVisible();

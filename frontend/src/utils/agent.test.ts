@@ -4,6 +4,7 @@ import type { HealthResponse, PairRisk } from '../types';
 
 const baseHealth: HealthResponse = {
   status: 'ok',
+  nebius_status: 'ok',
   nebius_ready: false,
   nebius_enabled: false,
   nebius_model: null,
@@ -27,6 +28,11 @@ describe('sentinelStatus', () => {
 });
 
 describe('sentinelMode', () => {
+  it('marks unchecked health as unverified even after a cached model result', () => {
+    const health = { ...baseHealth, nebius_ready: true, nebius_enabled: true, nebius_status: 'unchecked' as const };
+    expect(sentinelMode(health)).toBe('git+Nemotron (unverified)');
+    expect(sentinelMode(health, [{ model_score: 20 } as PairRisk])).toBe('git+Nemotron (unverified)');
+  });
   it('only degrades a failed run when no model score succeeded', () => {
     const health = { ...baseHealth, nebius_ready: true, nebius_enabled: true };
     const failed = { fallback_reason: 'unparsable', model_score: null } as PairRisk;

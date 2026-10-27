@@ -238,6 +238,7 @@ def _verify_allowed(req: AnalyzeRequest, repo: Path) -> bool:
 
 @router.get("/health")
 def health() -> dict:
+    nemotron.probe_status()
     model_status, last_error = nemotron.operational_status()
     return {
         "status": "ok",
