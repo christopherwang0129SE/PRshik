@@ -55,6 +55,31 @@ it('uses only the first sentence of the top confirmed model reading', () => {
   expect(screen.getByText('feature-a and feature-b are merged — but the operations change order.')).toBeVisible();
 });
 
+it('labels the summary proof with the recorded state count and hides it without a failing merge', () => {
+  const verification = (mergeFails: boolean) => ({
+    status: 'confirmed' as const, reason: 'Recorded failure', attempts: 1, cached_test: false,
+    merge_conflict: false, duration_s: 1, prompt_tokens: 0, completion_tokens: 0,
+    runs: (['a', 'b', 'merge'] as const).map(target => {
+      const fails = mergeFails && target === 'merge';
+      return {
+        target, ref: target, selection: '', exit_code: fails ? 1 : 0, passed: fails ? 0 : 1, failed: fails ? 1 : 0,
+        errors: 0, timed_out: false, duration_s: 1, output: fails ? 'E assert 200.0 == 198.0' : '',
+      };
+    }),
+  });
+  const pair = {
+    branch_a: 'feature-a', branch_b: 'feature-b', score: 90, level: 'high' as const, shared_files: 1,
+    overlapping_files: 0, collisions: [], score_source: 'model' as const, rationale: 'Order changes.',
+    verification: verification(true),
+  };
+  const { rerender } = render(<RunSummary response={{ ...response, pairs: [pair] }} target="repo" modelOk />);
+  const proof = screen.getByRole('group', { name: 'Proof: Nemotron’s intent test on 3 states' });
+  expect(within(proof).getAllByRole('listitem').map(item => item.textContent)).toEqual(['A onlyPASS', 'B onlyPASS', 'A+B mergeFAIL']);
+  expect(within(proof).getByText('Merged code returns 200.0 — expected 198.0.')).toBeVisible();
+  rerender(<RunSummary response={{ ...response, pairs: [{ ...pair, verification: verification(false) }] }} target="repo" modelOk />);
+  expect(screen.queryByRole('group', { name: /^Proof:/ })).not.toBeInTheDocument();
+});
+
 it('omits absent usage and keeps the full model out of the stats', () => {
   render(<RunSummary response={{ ...response, usage: null, risk_model: 'full-model-id' }} target="repo" />);
   expect(screen.getByTestId('run-figures').children).toHaveLength(1);
