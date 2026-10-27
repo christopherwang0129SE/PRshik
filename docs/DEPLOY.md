@@ -1,6 +1,6 @@
 # Public hosted demo: one Render free service
 
-Use the **Deploy to Render** button in [README](../README.md#public-hosting-on-render-free).
+Use the **Deploy to Render** button in [README](../README.md#deploy-your-own-on-render-free).
 The Blueprint uses the `main` branch. Dima applies it from an existing
 Render account, then shares the service's public HTTPS URL. Judges do not sign
 in. No keys or CORS variables are required. Do not create a separate Vercel app.
