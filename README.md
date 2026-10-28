@@ -854,10 +854,11 @@ frontend/           React dashboard
 docs/               customer discovery + notes
 ```
 
-## Why "MergeGuard"
+## Why "PRshik"
 
-Something is always on guard at the merge point — watching every in-flight
-branch so a conflict never lands as a surprise.
+"-shik" (Russian "-щик") names someone by the job they do. PRshik's job is your
+pull requests: it watches every branch in progress, so when two PRs would break
+each other, the pair is caught before it reaches main.
 
 ### Repository browser and analysis history
 
