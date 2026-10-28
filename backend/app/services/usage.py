@@ -14,13 +14,20 @@ class UsageMeter:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    cached_llm_calls: int = 0
+    cached_tokens: int = 0
+    cached_cost_usd: float = 0.0
+
     def record_call(self, prompt_tokens: int, completion_tokens: int) -> None:
         self.llm_calls += 1
         self.prompt_tokens += int(prompt_tokens)
         self.completion_tokens += int(completion_tokens)
 
-    def record_cache_hit(self) -> None:
+    def record_cache_hit(self, *, calls: int = 0, tokens: int = 0, cost_usd: float = 0.0) -> None:
         self.cache_hits += 1
+        self.cached_llm_calls += calls
+        self.cached_tokens += tokens
+        self.cached_cost_usd += cost_usd
 
     @property
     def total_tokens(self) -> int:
@@ -32,6 +39,9 @@ class UsageMeter:
 
     def summary_fields(self) -> dict:
         return {
+            "cached_llm_calls": self.cached_llm_calls,
+            "cached_tokens": self.cached_tokens,
+            "cached_cost_usd": self.cached_cost_usd,
             "model": settings.nebius_model,
             "llm_calls": self.llm_calls,
             "cache_hits": self.cache_hits,

@@ -163,8 +163,12 @@ export interface BranchTests {
 }
 
 export interface UsageSummary {
+  model_errors?: number;
   model: string;
   llm_calls: number;
+  cached_llm_calls?: number;
+  cached_tokens?: number;
+  cached_cost_usd?: number;
   cache_hits: number;
   prompt_tokens: number;
   completion_tokens: number;
@@ -194,6 +198,8 @@ export interface AnalyzeResponse {
 }
 
 export interface HealthResponse {
+  nebius_status?: 'not_configured' | 'unchecked' | 'ok' | 'auth_failed' | 'unreachable' | 'error';
+  nebius_last_error?: string | null;
   demo_mode?: boolean;
   status: string;
   nebius_ready: boolean;

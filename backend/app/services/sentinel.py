@@ -471,7 +471,7 @@ def _refine_one(
     if use_cache:
         hit = cache.get(key)
         if hit is not None:
-            meter.record_cache_hit()
+            meter.record_cache_hit(calls=hit.llm_calls, tokens=hit.total_tokens, cost_usd=hit.estimated_cost_usd)
             level = hit.risk_level if hit.risk_level in ("none", "low", "medium", "high") else None
             # Stored with the assessment. A hit must not call Tavily or the model.
             # Entries written before the field existed load as an empty list.
@@ -498,6 +498,7 @@ def _refine_one(
         pair = pair.model_copy(update={
             "docs_sources": [DocSource(**item) for item in docs_lookup.to_sources(snippets)],
         })
+    assessment_calls = 0
     try:
         prompt = build_pair_prompt(
             base_branch=base_branch,
@@ -512,6 +513,7 @@ def _refine_one(
         reply = nemotron.complete(prompt)
         prompt_tokens, completion_tokens = nemotron.usage_of(reply)
         meter.record_call(prompt_tokens, completion_tokens)
+        assessment_calls += 1
         assessment = parse_assessment(reply)
         contradicted = claims.unsupported_claims(assessment.rationale, pair.static_compatible)
         if contradicted:
@@ -520,12 +522,14 @@ def _refine_one(
                 retry = nemotron.complete(claims.repair_prompt(prompt, reply, contradicted))
                 p_tok, c_tok = nemotron.usage_of(retry)
                 meter.record_call(p_tok, c_tok)
+                assessment_calls += 1
                 prompt_tokens += p_tok
                 completion_tokens += c_tok
                 assessment = parse_assessment(retry)
             except NemotronError as exc:
                 if exc.prompt_tokens or exc.completion_tokens:
                     meter.record_call(exc.prompt_tokens, exc.completion_tokens)
+                    assessment_calls += 1
                     prompt_tokens += exc.prompt_tokens
                     completion_tokens += exc.completion_tokens
     except NemotronError as exc:
@@ -540,6 +544,7 @@ def _refine_one(
         key,
         cache.from_payload(
             {
+                "llm_calls": assessment_calls,
                 "risk_score": assessment.risk_score,
                 "rationale": assessment.rationale,
                 "risk_level": assessment.risk_level,
@@ -974,6 +979,7 @@ def analyze(
     usage = UsageSummary(
         **meter.summary_fields(),
         pairs_total=len(pairs),
+        model_errors=sum(p.fallback_reason in ("model_error", "unparsable") for p in pairs),
         pairs_prefiltered=sum(1 for p in pairs if not p.prefilter_candidate),
         pairs_sent_to_model=sum(1 for p in pairs if p.score_source == "model"),
         pairs_capped=sum(1 for p in pairs if p.fallback_reason == "pair_cap"),

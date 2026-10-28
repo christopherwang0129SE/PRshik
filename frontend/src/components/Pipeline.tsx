@@ -1,3 +1,4 @@
+import { Fragment, useEffect, useRef } from 'react';
 import type { RunState, StageProgress } from '../utils/run';
 import { formatClock, formatDuration, skippedModelDetail, stagesFor } from '../utils/run';
 
@@ -15,6 +16,7 @@ interface PipelineProps {
   onCancel?: () => void;
   /** Health says Nemotron is off. Model steps must not claim they will run. */
   gitOnly?: boolean;
+  model?: string | null;
 }
 
 const stateText = (stage: StageProgress, mode: PipelineMode): string => {
@@ -23,7 +25,7 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
       return 'running';
     case 'done':
       return stage.startedAt !== undefined && stage.endedAt !== undefined
-        ? formatDuration(stage.endedAt - stage.startedAt)
+        ? `✓ ${formatDuration(stage.endedAt - stage.startedAt)}`
         : 'done';
     case 'skipped':
       return 'skipped';
@@ -37,39 +39,38 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
  * reports them. Before a run it doubles as the explanation of what will
  * happen; after a run it keeps the time each stage took.
  */
-export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }: PipelineProps) => {
+export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, model }: PipelineProps) => {
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  const previousMode = useRef<PipelineMode>('idle');
+  useEffect(() => {
+    if (mode === 'finished' && previousMode.current !== 'finished' && disclosure.current) disclosure.current.open = true;
+    previousMode.current = mode;
+  }, [mode]);
   const running = mode === 'live' || mode === 'blind';
   const stages = stagesFor(gitOnly);
-  const content = (
-    <section className="pipeline" data-mode={mode} aria-labelledby="pipeline-heading" data-testid="pipeline">
-      <div className="pipeline-head">
-        <h2 id="pipeline-heading" className="pipeline-title">
-          {mode === 'idle' ? 'How a run works' : running ? 'Analyzing' : 'Pipeline'}
-        </h2>
-        {running && (
-          <div className="pipeline-clock">
-            <span className="sr-only">Elapsed</span>
-            <span className="clock tabular" data-testid="elapsed" aria-hidden="false">
-              {formatClock(elapsedS)}
-            </span>
-            {onCancel && (
-              <button type="button" className="btn btn-quiet" onClick={onCancel}>
-                Cancel
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <ol className="stages">
+  const gitScored = run.pairs.some(p => p.git_score != null);
+  const renderStages = (compact: boolean) => (
+    <ol className={compact ? "run-stepper" : "stages"} aria-label={compact ? "Run stages" : undefined}>
         {stages.map((def) => {
           const stage = run.stages[def.id];
-          const text = stateText(stage, mode);
+          const modelFailed = def.id === 'model' && run.pairs.some(p => p.fallback_reason === 'model_error' || p.fallback_reason === 'unparsable');
+          const modelDone = def.id === 'model' && stage.state !== 'running' && run.pairs.some(p => p.model_score != null);
+          const noKeySkipped = def.id === 'model' && gitOnly && (mode === 'finished' || stage.state === 'skipped' || run.pairs.length > 0);
+          const state = modelFailed ? 'failed' : modelDone ? 'done' : noKeySkipped ? 'skipped' : stage.state;
+          const text = modelFailed ? 'failed' : modelDone ? (stage.startedAt !== undefined && stage.endedAt !== undefined ? stateText(stage, mode) : 'done') : noKeySkipped ? 'skipped (no key)' : stateText(stage, mode);
           const detail =
-            gitOnly && stage.state === 'skipped' && (def.id === 'model' || def.id === 'verify')
+            gitOnly && state === 'skipped' && (def.id === 'model' || def.id === 'verify')
               ? skippedModelDetail(def.id, stage.detail)
               : stage.detail;
           return (
-            <li key={def.id} className="stage" data-state={stage.state} data-testid={`stage-${def.id}`}>
+            <Fragment key={def.id}>
+            {mode === 'idle' && def.id === 'model' && <li className="stage" data-state={gitScored ? 'done' : 'idle'} data-testid={compact ? undefined : "stage-git"}>
+              <span className="stage-bar" aria-hidden="true"></span>
+              <span className="stage-title">Git score</span>
+              {gitScored && <span className="stage-state">done</span>}
+              {mode === 'idle' && <span className="stage-about">Scores git hunk overlap for every pair.</span>}
+            </li>}
+            <li className="stage" data-state={state} data-testid={compact ? undefined : `stage-${def.id}`}>
               <span className="stage-bar" aria-hidden="true"></span>
               <span className="stage-title">{def.title}</span>
               {text && <span className="stage-state tabular">{text}</span>}
@@ -79,9 +80,27 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
                 detail && <span className="stage-detail">{detail}</span>
               )}
             </li>
+            </Fragment>
           );
         })}
       </ol>
+  );
+  const content = (
+    <section className="pipeline" data-mode={mode} aria-labelledby="pipeline-heading" data-testid="pipeline">
+      <div className="pipeline-head">
+        <h2 id="pipeline-heading" className="pipeline-title">
+          {mode === 'idle' ? 'How a run works' : 'Pipeline'}
+        </h2>
+      </div>
+      {mode === 'idle' ? <>
+        <ol className="pipeline-beats">{[
+          ['Find pairs', 'Static prefilter, no LLM'],
+          [gitOnly ? 'Git scores' : 'Nemotron scores & explains', gitOnly ? 'Model unavailable' : 'Review shared code'],
+          ['Prove by test on A, B, base, A+B', 'Compare test outcomes'],
+          ['Cost, cached', 'Report usage and cache hits'],
+        ].map(([title, description], i) => <li key={title}><span>{i + 1}</span><h3>{title}</h3><p>{description}</p></li>)}</ol>
+        <details><summary>Full pipeline</summary>{renderStages(false)}</details>
+      </> : renderStages(false)}
       {mode === 'blind' && (
         <p className="pipeline-note">
           This backend has no live progress stream, so stages show when the whole run finishes.
@@ -89,10 +108,26 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false }:
       )}
     </section>
   );
-  return mode === 'finished' ? (
-    <details className="pipeline-history">
-      <summary>Run details <span>Pipeline stages and timings</span></summary>
-      {content}
-    </details>
-  ) : content;
+  return mode === 'idle' ? content : (
+    <>
+      {running && <section className="stepper-panel" aria-label="Pipeline progress">
+        {running && (
+          <div className="pipeline-head">
+            <h2 className="pipeline-title">Analyzing</h2>
+            <div className="pipeline-clock">
+              <span className="sr-only">Elapsed</span>
+              <span className="clock tabular" data-testid="elapsed">{formatClock(elapsedS)}</span>
+              {onCancel && <button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button>}
+            </div>
+          </div>
+        )}
+        {renderStages(true)}
+      </section>}
+      <details className="pipeline-history" ref={disclosure}>
+        <summary>Run details <span>Pipeline stages and timings</span></summary>
+        {model && <p className="run-model mono">Model: {model}</p>}
+        {content}
+      </details>
+    </>
+  );
 };

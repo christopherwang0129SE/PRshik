@@ -5,7 +5,7 @@ import { analyzeStream, StreamUnavailableError } from './services/stream';
 import { classifyRepoInput } from './utils/repo';
 import { describeError, BACKEND_START_COMMAND } from './utils/errors';
 import { rankPairs, summaryLine } from './utils/verdict';
-import { sentinelMode } from './utils/agent';
+import { modelFailure } from './utils/agent';
 import { activeStage, finishRun, formatClock, initialRun, pairKey, reduceRun } from './utils/run';
 import type { RunState } from './utils/run';
 import { formatHash, parseHash } from './utils/hash';
@@ -319,15 +319,16 @@ function App() {
   };
 
   const backendOffline = healthChecked && !health;
-  const gitOnly = health !== null && sentinelMode(health) === 'git only';
-  const modelReady = health !== null && !gitOnly;
+  const gitOnly = health !== null && !(health.nebius_ready && health.nebius_enabled);
   const errorHelp = error ? describeError(error, API_BASE_URL) : null;
   const pairs = response?.pairs ?? run.pairs;
+  const failure = modelFailure(health, pairs);
+  const modelReady = health !== null && !gitOnly && !failure;
   const selected = pairs.find((p) => pairKey(p) === selectedKey) ?? null;
   const pending = loading ? Math.max(0, (run.branches.length * (run.branches.length - 1)) / 2 - run.pairs.length) : 0;
   const showWorkspace = target && (response || (loading && (run.pairs.length > 0 || run.branches.length > 1)));
   const pipelineMode = phase === 'idle' ? 'idle' : loading ? (streamed ? 'live' : 'blind') : 'finished';
-  const showPipeline = !restoredAt && (phase === 'idle' || loading || (streamed && phase !== 'error'));
+  const showPipeline = phase !== 'error';
 
   return (
     <div className="app">
@@ -336,14 +337,11 @@ function App() {
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-          <a className="wordmark" href="/" aria-label="MergeGuard home">
-            <span className="wordmark-glyph" aria-hidden="true">
-              <span></span>
-              <span></span>
-            </span>
-            MergeGuard
+          <a className="wordmark" href="/" aria-label="PRshik home">
+            <img className="wordmark-icon" src="/favicon.svg" width="24" height="24" alt="" aria-hidden="true" />
+            PRshik
           </a>
-          <AgentStatus health={health} checked={healthChecked && !(import.meta.env.PROD && !health)} />
+          <AgentStatus health={health} pairs={pairs} checked={healthChecked && !(import.meta.env.PROD && !health)} />
         </div>
       </header>
 
@@ -353,15 +351,15 @@ function App() {
             <strong>Git-only scores.</strong> This demo runs without a Nebius Token Factory key, so Nemotron and Tavily are off. Risk comes from git hunk overlap and the branch tests still run.
           </p>
         )}
-        <section className="intake" data-phase={phase} aria-labelledby="intake-heading">
-          <h1 id="intake-heading" className={phase === 'idle' ? 'intake-title' : 'intake-title is-compact'}>
+        <section className="intake" data-phase={phase} aria-label="Analyze branches">
+          {!response && pairs.length === 0 && <h1 id="intake-heading" className={phase === 'idle' ? 'intake-title' : 'intake-title is-compact'}>
             Find branch pairs that merge cleanly and still break
-          </h1>
+          </h1>}
           {phase === 'idle' && (
             <p className="intake-lede">
               {modelReady
-                ? 'MergeGuard diffs every branch against the base, asks Nemotron which pairs interact, and proves a conflict by running tests on the merged code.'
-                : 'MergeGuard diffs every branch against the base, scores pairs from git hunk overlap, and proves a conflict by running each branch\'s tests on the merged code.'}
+                ? 'PRshik diffs every branch against the base, asks Nemotron which pairs interact, and proves a conflict by running tests on the merged code.'
+                : 'PRshik diffs every branch against the base, scores pairs from git hunk overlap, and proves a conflict by running each branch\'s tests on the merged code.'}
             </p>
           )}
 
@@ -415,7 +413,7 @@ function App() {
 
           {(DEMO_REPO_PATH || API_DEMO_REPO_PATH) && (
             <div className="demos" role="group" aria-label="Bundled demos">
-              {DEMO_REPO_PATH && (
+              {DEMO_REPO_PATH && phase === 'idle' && (
                 <div className="demo">
                   <button
                     type="button"
@@ -481,6 +479,7 @@ function App() {
           setRepoInput(repo); setBaseBranch(base); runAnalysis(repo, base);
         }} />}
         {(advanced || history.length > 0) && <section className="library" aria-label="Analysis history">
+          {phase !== 'idle' && DEMO_REPO_PATH && <button type="button" className="btn demo-secondary" disabled={loading || (import.meta.env.PROD && !health)} onClick={() => handleTryDemo(DEMO_REPO_PATH)}>Try demo repo</button>}
           <details>
             <summary>Analysis history <span className="tabular">({history.length})</span></summary>
             <div className="library-body">
@@ -506,13 +505,15 @@ function App() {
           {announcement}
         </p>
 
+        {failure && <p className="mode-note degraded-note" role="status">Nemotron unavailable: {failure === 'auth_failed' ? 'Token Factory authentication failed.' : failure === 'unreachable' ? 'Token Factory could not be reached.' : 'The model call failed.'} Scores fall back to git + branch tests.</p>}
         {phase === 'done' && response && target && (
-          <RunSummary response={response} target={target.repo} headingRef={summaryRef} />
+          <RunSummary response={response} target={target.repo} headingRef={summaryRef} modelOk={health?.nebius_status === 'ok' && !failure} />
         )}
 
         <div ref={pipelineRef} className="pipeline-slot">
           {showPipeline && (
             <Pipeline
+              model={response?.risk_model ?? response?.usage?.model}
               run={run}
               mode={pipelineMode}
               elapsedS={elapsed}
@@ -553,7 +554,7 @@ function App() {
                   source={target.source}
                   baseBranch={response?.base_branch ?? run.baseBranch ?? target.base}
                   usage={response?.usage ?? null}
-                  provisional={loading}
+                  provisional={loading && !(selected.branch_tests && (selected.verification || ['done', 'skipped'].includes(run.stages.verify.state)))}
                   headingRef={detailRef}
                   gitOnly={gitOnly}
                 />
@@ -587,15 +588,16 @@ function App() {
           {gitOnly ? (
             <>
               Git scoring and branch tests run without a model. Using Nemotron, intent tests, the resolver, or Tavily
-              needs a Nebius key; not enabled in this demo. API at <code>{API_BASE_URL || window.location.origin}</code>.
+              needs a Nebius key; not enabled in this demo.
             </>
           ) : (
             <>
               Risk explanations and intent tests by NVIDIA Nemotron 3 Super on Nebius Token Factory. Library docs from
-              Tavily. API at <code>{API_BASE_URL || window.location.origin}</code>.
+              Tavily.
             </>
           )}
         </p>
+        {import.meta.env.DEV && <p>API at <code>{API_BASE_URL || window.location.origin}</code>.</p>}
       </footer>
     </div>
   );

@@ -202,10 +202,13 @@ def is_risky(p: dict[str, Any]) -> bool:
             or p["textual_merge_conflict"] or bool(p["static_breaks"]))
 
 
-def _model_note() -> str | None:
+def _model_note(res: AnalyzeResponse) -> str | None:
     if not settings.nebius_ready:
-        return ("NEBIUS_API_KEY is not set for the MCP server, so scores come from the git "
-                "heuristic only and nothing is verified by test.")
+        return ("Nemotron scoring and generated intent tests are skipped because no key is configured. "
+                "The branches' own tests still run on the merge and can confirm a conflict.")
+    if any(p.fallback_reason in ("model_error", "unparsable") for p in res.pairs):
+        return ("Nemotron calls failed for some pairs; their scores fall back to git. "
+                "The branches' own tests still run on the merge and can confirm a conflict.")
     return None
 
 
@@ -242,7 +245,7 @@ def _prepare(repo_path: str, base: str) -> tuple[Path, str, list[str]]:
 
 def _envelope(repo: Path, base: str, res: AnalyzeResponse, **body: Any) -> dict[str, Any]:
     out: dict[str, Any] = {"repo": str(repo), "base": base, **body, "cost": cost_summary(res)}
-    note = _model_note()
+    note = _model_note(res)
     if note:
         out["note"] = note
     return scrub(out)

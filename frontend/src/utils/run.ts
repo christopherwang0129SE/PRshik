@@ -28,8 +28,7 @@ export const stagesFor = (gitOnly: boolean): StageDef[] => {
     if (stage.id === 'model') {
       return {
         ...stage,
-        title: 'Git score',
-        about: `Risk comes from git hunk overlap. Nemotron ${NEEDS_NEBIUS_KEY}.`,
+        about: `Nemotron ${NEEDS_NEBIUS_KEY}.`,
       };
     }
     if (stage.id === 'verify') {
@@ -95,7 +94,7 @@ export const reduceRun = (run: RunState, event: StreamEvent): RunState => {
         state,
         label: event.label || prev.label,
         detail: event.detail ?? prev.detail,
-        startedAt: event.status === 'start' ? event.t : prev.startedAt ?? event.t,
+        startedAt: event.status === 'start' ? event.t : prev.startedAt,
         endedAt: event.status === 'start' ? undefined : event.t,
       };
       return { ...run, lastT, stages: { ...run.stages, [event.stage]: next } };
@@ -124,7 +123,7 @@ export const finishRun = (run: RunState, result: AnalyzeResponse): RunState => (
   stages: Object.fromEntries(
     Object.entries(run.stages).map(([id, stage]) => [
       id,
-      stage.state === 'running' ? { ...stage, state: 'done' as const, endedAt: run.lastT } : stage,
+      stage.state === 'running' ? { ...stage, state: 'done' as const, endedAt: undefined } : stage,
     ])
   ) as Record<StageId, StageProgress>,
 });

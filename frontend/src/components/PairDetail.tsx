@@ -1,6 +1,7 @@
-import type { Ref } from 'react';
+import { keptRuns } from '../utils/verification';
+import { useState, type Ref } from 'react';
 import type { AnalyzeRequest, PairRisk, UsageSummary } from '../types';
-import { isFloorRule, isHiddenConflict, levelToText } from '../utils/risk';
+import { isFloorRule, isHiddenConflict, gitLevelFromScore, levelToText } from '../utils/risk';
 import { VERDICT_TEXT, pairVerdict } from '../utils/verdict';
 import { usableDocs } from '../utils/docs';
 import { formatCost } from '../utils/usage';
@@ -41,17 +42,6 @@ const FALLBACK_TEXT: Record<string, string> = {
   unparsable: 'the model answer was unreadable',
 };
 
-/** "raised: confirmed by test" + blended 44 -> "Raised from 44: confirmed by test". */
-const scoreNote = (pair: PairRisk): string => {
-  const note = pair.score_note ?? '';
-  const match = /^(raised|lowered):\s*(.*)$/i.exec(note);
-  if (match && pair.blended_score !== null && pair.blended_score !== undefined) {
-    const verb = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
-    return `${verb} from ${Math.round(pair.blended_score)}: ${match[2]}`;
-  }
-  return note;
-};
-
 /** Why the pair scored as it did, from the source that set the score. */
 const Explanation = ({ pair }: { pair: PairRisk }) => {
   const fromModel = pair.score_source === 'model';
@@ -62,16 +52,16 @@ const Explanation = ({ pair }: { pair: PairRisk }) => {
         {fromModel ? 'Nemotron’s reading' : 'Git heuristic'}
       </h3>
       <p className="explain-text">{text}</p>
-      {isHiddenConflict(pair) && pairVerdict(pair) !== 'confirmed' && (
+      {isHiddenConflict(pair) && pair.git_score != null && pairVerdict(pair) !== 'confirmed' && (
         <p className="explain-note">
           Nemotron rates this {pair.model_level} risk while the diff alone looks{' '}
-          {levelToText(pair.level).toLowerCase()}: a conflict git cannot see.
+          {(pair.git_score === 0 ? 'low' : levelToText(gitLevelFromScore(pair.git_score)).toLowerCase())}: a conflict git cannot see.
         </p>
       )}
       {isFloorRule(pair) && (
         <p className="explain-note">
-          Both branches edit the same lines, so the score stays at the git level ({Math.round(pair.git_score ?? 0)})
-          even though Nemotron scored it {Math.round(pair.model_score ?? 0)}.
+          Both branches edit the same lines, so the score stays at the git level ({Math.round(pair.git_score!)})
+          even though Nemotron scored it {Math.round(pair.model_score!)}.
         </p>
       )}
       {!fromModel && pair.fallback_reason && FALLBACK_TEXT[pair.fallback_reason] && (
@@ -160,43 +150,75 @@ const Cost = ({ pair, usage }: { pair: PairRisk; usage?: UsageSummary | null }) 
  * side by side, the test evidence, the docs Nemotron read and what it cost.
  */
 export const PairDetail = ({ pair, source, baseBranch, usage, provisional = false, headingRef, gitOnly = false }: PairDetailProps) => {
+  const [changesOpen, setChangesOpen] = useState(() => !window.matchMedia?.('(max-width: 640px)').matches);
   const verdict = pairVerdict(pair);
   const awaitingVerdict = provisional && verdict === 'clean';
   const docs = usableDocs([...(pair.docs_sources ?? []), ...(pair.verification?.docs_sources ?? [])]);
+  const branchFailure = pair.branch_tests?.confirming[0];
+  const mergeRun = pair.verification?.runs.find(r => r.target === 'merge' && (r.failed > 0 || r.errors > 0));
+  const output = mergeRun?.output || branchFailure?.excerpt;
+  const lines = output?.split('\n') ?? [];
+  const failureLine = lines.find(line => /AssertionError:.* != /.test(line))
+    ?? lines.find(line => /^E\s+assert\s/.test(line.trim()))
+    ?? lines.find(line => /assert\s|AssertionError|Expected:|expected .* (?:to|but)/i.test(line));
+  const assertion = failureLine?.replace(/^(?:E\s+|>\s*)?\s*/, '').slice(0, 240) ?? output?.trim().slice(0, 240);
+  const proof = assertion || pair.static_breaks?.[0];
+  const outcomes = (pair.verification ? keptRuns(pair.verification) : pair.branch_tests?.runs ?? [])
+    .filter(r => !r.timed_out && r.exit_code !== null && r.errors === 0 && r.passed + r.failed > 0 && (r.failed > 0 || r.exit_code === 0));
+  const outcome = (target: string) => {
+    const run = outcomes.find(r => r.target === target);
+    return run ? (run.failed > 0 ? 'fail' : 'pass') : null;
+  };
+  const branchesPass = outcome('a') === 'pass' && outcome('b') === 'pass';
+  const caption = branchesPass && outcome('merge') === 'fail' && outcome('base') === 'fail';
+  const literal = String.raw`(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|'(?:[^'\\\r\n]|\\.)*'|"(?:[^"\\\r\n]|\\.)*")`;
+  const comparison = assertion?.match(/^(?:AssertionError:\s*|assert\s+)?(.+?)\s+!=\s+(.+)$/)
+    ?? assertion?.match(new RegExp(`^assert\\s+(${literal})\\s+==\\s+(${literal})\\s*$`));
+  const confirmedLine = branchesPass && outcome('merge') === 'fail'
+    ? VERDICT_LINE.confirmed : 'A test confirms a failure on the merged code.';
   return (
     <article className="detail" data-verdict={awaitingVerdict ? 'pending' : verdict} aria-labelledby="detail-heading" data-testid="pair-detail">
       <header className="detail-head">
         <h2 id="detail-heading" className="detail-pair" ref={headingRef} tabIndex={-1}>
           <span className="pair-side">
             <span className="side-key" aria-hidden="true">A</span>
-            <span className="pair-branch">{pair.branch_a}</span>
+            <span className="pair-branch" title={pair.branch_a}><bdi>{pair.branch_a}</bdi></span>
           </span>
           <span className="sr-only"> and </span>
           <span className="pair-side">
             <span className="side-key" aria-hidden="true">B</span>
-            <span className="pair-branch">{pair.branch_b}</span>
+            <span className="pair-branch" title={pair.branch_b}><bdi>{pair.branch_b}</bdi></span>
           </span>
         </h2>
+        <RiskGauge pair={pair} provisional={provisional} />
         <p className="detail-verdict">
           <span className="verdict-word">{awaitingVerdict ? 'Awaiting verdict' : VERDICT_TEXT[verdict]}</span>
-          <span className="verdict-why">{awaitingVerdict ? 'Risk scoring and test checks are still running.' : VERDICT_LINE[verdict]}</span>
+          <span className="verdict-why">{awaitingVerdict ? 'Risk scoring and test checks are still running.' : verdict === 'confirmed' ? confirmedLine : VERDICT_LINE[verdict]}</span>
         </p>
         {provisional && <p className="detail-provisional">Still running: this pair may change when the tests finish.</p>}
       </header>
 
-      <div className="detail-top">
-        <div className="detail-gauge">
-          <RiskGauge pair={pair} />
-          {pair.score_note && (
-            <p className="gauge-note" data-testid="score-note">
-              {scoreNote(pair)}
-            </p>
-          )}
-        </div>
-        <Explanation pair={pair} />
-      </div>
+      {proof && <section className="block proof-card" aria-label="Critical proof">
+        <h3 className="block-title">{pair.verification ? "Nemotron's intent test, run on all four states" : assertion ? 'Branch test failed on A+B merge' : 'Static evidence'}</h3>
+        {comparison && <p className="proof-money">Merged code returns {comparison[1]} — expected {comparison[2]}.</p>}
+        <div className="proof-strip">
 
-      <section className="block" aria-labelledby="diff-heading">
+          <code className="proof-assertion">{proof}</code>
+        </div>
+        {outcomes.length > 0 && <dl className="proof-matrix" aria-label="Verification run outcomes">
+          {(['a', 'b', 'merge', 'base'] as const).map(target => {
+            const result = outcome(target);
+            if (!result) return null;
+            return <div key={target} className={target === 'base' ? 'proof-base' : undefined}><dt>{{ base: 'merge-base (before either branch)', a: 'A only', b: 'B only', merge: 'A+B merge' }[target]}</dt><dd data-outcome={result}>{result === 'fail' ? 'FAIL' : 'PASS'}</dd></div>;
+          })}
+        </dl>}
+        {caption && <p className="proof-caption">Passes on each branch alone and fails on the merge; it also fails on the base, where neither change exists yet.</p>}
+      </section>}
+
+      <Explanation pair={pair} />
+
+      <details className="block changes-disclosure" open={changesOpen} onToggle={e => setChangesOpen(e.currentTarget.open)}>
+        <summary>Show changes</summary>
         <h3 id="diff-heading" className="block-title">
           Both diffs <span className="block-sub">against {baseBranch}, lined up on the base file</span>
         </h3>
@@ -204,7 +226,7 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
           <Symbols pair={pair} />
           <PairDiff source={source} baseBranch={baseBranch} branchA={pair.branch_a} branchB={pair.branch_b} />
         </div>
-      </section>
+      </details>
 
       {pair.verification ? (
         <VerificationDetails verification={pair.verification} branchA={pair.branch_a} branchB={pair.branch_b} />
@@ -222,17 +244,6 @@ export const PairDetail = ({ pair, source, baseBranch, usage, provisional = fals
         <BranchTestDetails branchTests={pair.branch_tests} branchA={pair.branch_a} branchB={pair.branch_b} />
       )}
       <DocsSources sources={docs} />
-      {verdict === 'confirmed' && [pair.branch_a, pair.branch_b].includes('feat/discount-cap') && [pair.branch_a, pair.branch_b].includes('feat/tax-before-discount') && (
-        <section className="block" aria-labelledby="suggestion-heading">
-          <h3 id="suggestion-heading" className="block-title">Suggested next step</h3>
-          <div className="block-body">
-            <p>Agree on whether the discount cap applies before or after tax. Keep the cap on the pre-tax subtotal, then apply tax, if preserving the discount branch’s contract.</p>
-            <p>Update the competing tax-order contract and rerun both branches’ tests together before merging.</p>
-            <p className="muted">Demo guidance for human review. This dashboard has no integrated planner or resolver and has not applied a fix.</p>
-            {gitOnly && <p>The resolver {NEEDS_NEBIUS_KEY}.</p>}
-          </div>
-        </section>
-      )}
       {advancedView() && <Cost pair={pair} usage={usage} />}
     </article>
   );

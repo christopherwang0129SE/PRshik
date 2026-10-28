@@ -45,10 +45,10 @@ export const PairIndex = ({ pairs, selectedKey, onSelect, live = false, pendingC
                   {Math.round(pair.score)}
                 </span>
                 <span className="row-branches">
-                  <span className="row-branch">{pair.branch_a}</span>
+                  <span className="row-branch"><span className="side-key" aria-hidden="true">A</span><span className="branch-tail" title={pair.branch_a}><bdi>{pair.branch_a}</bdi></span></span>
                   <span className="row-branch">
                     <span className="sr-only">and </span>
-                    {pair.branch_b}
+                    <span className="side-key" aria-hidden="true">B</span><span className="branch-tail" title={pair.branch_b}><bdi>{pair.branch_b}</bdi></span>
                   </span>
                 </span>
                 <span className="row-verdict">{live && verdict === 'clean' ? 'Awaiting verdict' : VERDICT_TEXT[verdict]}</span>

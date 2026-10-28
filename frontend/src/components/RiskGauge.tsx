@@ -3,76 +3,33 @@ import { levelToText } from '../utils/risk';
 
 interface RiskGaugeProps {
   pair: PairRisk;
+  provisional?: boolean;
 }
 
-const TICKS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-const clamp = (n: number) => Math.min(100, Math.max(0, n));
-
-/**
- * The risk score as an instrument: the published score in large numerals,
- * read off a 0-100 scale whose zones match the backend's thresholds
- * (40 medium, 70 high). The git heuristic and Nemotron's own score sit on
- * the same scale, so a disagreement between them is visible at a glance.
- */
-export const RiskGauge = ({ pair }: RiskGaugeProps) => {
-  const score = Math.round(pair.score);
-  const marks: Array<{ key: string; label: string; value: number }> = [];
-  if (pair.git_score !== null && pair.git_score !== undefined) {
-    marks.push({ key: 'git', label: 'git', value: Math.round(pair.git_score) });
-  }
-  if (pair.model_score !== null && pair.model_score !== undefined) {
-    marks.push({ key: 'model', label: 'Nemotron', value: Math.round(pair.model_score) });
-  }
-  // Two markers on the same value would print on top of each other.
-  const collide = marks.length === 2 && Math.abs(marks[0].value - marks[1].value) < 12;
-
+export const RiskGauge = ({ pair, provisional = false }: RiskGaugeProps) => {
+  const score = pair.score == null ? null : Math.round(pair.score);
+  const legend = [
+    pair.git_score != null ? `git heuristic ${Math.round(pair.git_score)}` : null,
+    pair.model_score != null ? `Nemotron ${Math.round(pair.model_score)}` : null,
+    pair.score_note || null,
+  ].filter(Boolean).join(' · ');
   return (
-    <figure className="gauge" data-level={pair.level} data-testid="risk-gauge">
-      <div className="gauge-readout">
-        <span className="gauge-num tabular" data-testid="gauge-score">
-          {score}
-        </span>
-        <span className="gauge-unit">
-          <span className="gauge-level">{levelToText(pair.level)} risk</span>
-          <span className="gauge-max">out of 100</span>
-        </span>
+    <figure className="gauge" data-level={provisional ? 'pending' : pair.level} data-testid="risk-gauge">
+      {score != null && <div className="gauge-readout">
+        <span className="gauge-num tabular" data-testid="gauge-score">{score}</span>
+        <span className="gauge-unit">/ 100 · {provisional ? 'provisional' : levelToText(pair.level).toLowerCase()}</span>
+      </div>}
+      <div className="risk-track" aria-hidden="true">
+        {score != null && <span className="risk-marker" style={{ left: `${Math.min(100, Math.max(0, score))}%` }}>
+          <span className="risk-value" data-align={score < 15 ? 'start' : score > 85 ? 'end' : undefined}>{score}{provisional ? ' provisional' : ''}</span>
+        </span>}
       </div>
-      <div className="gauge-scale" aria-hidden="true">
-        <div className="gauge-zones">
-          <span className="zone zone-low"></span>
-          <span className="zone zone-medium"></span>
-          <span className="zone zone-high"></span>
-        </div>
-        <div className="gauge-ticks">
-          {TICKS.map((t) => (
-            <span key={t} className="tick" data-major={t % 50 === 0 || t === 40 || t === 70 || undefined} style={{ left: `${t}%` }}></span>
-          ))}
-        </div>
-        <span className="needle" style={{ left: `${clamp(score)}%` }}></span>
-        {marks.map((m, i) => (
-          <span
-            key={m.key}
-            className="mark"
-            data-kind={m.key}
-            data-low={collide && i === 1 ? true : undefined}
-            data-align={m.value < 12 ? 'start' : m.value > 88 ? 'end' : undefined}
-            style={{ left: `${clamp(m.value)}%` }}
-          >
-            <span className="mark-label">
-              {m.label} <span className="tabular">{m.value}</span>
-            </span>
-          </span>
-        ))}
-        <div className="gauge-legend">
-          <span style={{ left: '0%' }}>0</span>
-          <span style={{ left: '40%' }}>40</span>
-          <span style={{ left: '70%' }}>70</span>
-          <span style={{ left: '100%' }}>100</span>
-        </div>
-      </div>
+      {legend && <p className="risk-legend">{legend}</p>}
+      {pair.git_score != null && pair.git_score < 40 && (pair.branch_tests?.merge_conflict === false || pair.verification?.merge_conflict === false) && pair.overlapping_files === 0 && !pair.branch_tests?.merge_conflict && !pair.verification?.merge_conflict && <span className="git-clean-tag">git: merges cleanly</span>}
       <figcaption className="sr-only">
-        Risk score {score} out of 100, {levelToText(pair.level).toLowerCase()} risk.
-        {marks.map((m) => ` ${m.label} scored ${m.value}.`).join('')}
+        {score != null && `Risk score ${score} out of 100${provisional ? '; checks running' : `, ${levelToText(pair.level).toLowerCase()} risk`}.`}
+        {pair.git_score != null && ` git scored ${Math.round(pair.git_score)}.`}
+        {pair.model_score != null && ` Nemotron scored ${Math.round(pair.model_score)}.`}
       </figcaption>
     </figure>
   );
