@@ -519,7 +519,7 @@ describe('App', () => {
     expect(await screen.findByText(/backend isn.t answering/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Repository'), { target: { value: '/tmp/repo' } });
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
-    expect(await screen.findByRole('heading', { name: "Can't reach the MergeGuard backend" })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: "Can't reach the PRshik backend" })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Command to run' })).toHaveTextContent('uvicorn app.main:app');
   });
 });

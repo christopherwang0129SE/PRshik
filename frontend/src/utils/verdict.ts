@@ -54,7 +54,7 @@ export const verdictFor = (pairs: PairRisk[]): Verdict => {
       tone: 'empty',
       level: 'none',
       headline: 'No branch pairs to compare',
-      detail: 'MergeGuard needs at least two branches besides the base branch.',
+      detail: 'PRshik needs at least two branches besides the base branch.',
     };
   }
 
@@ -168,7 +168,7 @@ const testFact = (pairs: PairRisk[]): string => {
   return `${fact}.`;
 };
 
-/** What MergeGuard concluded about one pair, in one word. */
+/** What PRshik concluded about one pair, in one word. */
 export type PairVerdict = 'confirmed' | 'suspected' | 'clean' | 'skipped';
 
 /**
