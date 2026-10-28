@@ -17,7 +17,7 @@ export const API_DEMO_REPO_COMMAND = 'python3 demo/make_api_demo_repo.py';
 export const describeError = (message: string, apiBase: string): ErrorHelp => {
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
     return {
-      title: "Can't reach the MergeGuard backend",
+      title: "Can't reach the PRshik backend",
       body: `Nothing answered at ${apiBase}.`,
       fix: { text: 'Start the backend from the repository root, then try again:', command: BACKEND_START_COMMAND },
     };
@@ -43,7 +43,7 @@ export const describeError = (message: string, apiBase: string): ErrorHelp => {
     return {
       title: 'This deployment only runs the bundled demos',
       body: message,
-      fix: { text: 'Choose Try demo repo or Try API demo (Tavily), or run MergeGuard locally to analyze your own repository.' },
+      fix: { text: 'Choose Try demo repo or Try API demo (Tavily), or run PRshik locally to analyze your own repository.' },
     };
   }
   if (/clone failed/i.test(message)) {

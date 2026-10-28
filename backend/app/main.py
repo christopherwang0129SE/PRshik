@@ -1,4 +1,4 @@
-"""MergeGuard — FastAPI entrypoint."""
+"""PRshik — FastAPI entrypoint."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +11,7 @@ from app.api.routes import router
 from app.config import cors_middleware_kwargs
 
 app = FastAPI(
-    title="MergeGuard",
+    title="PRshik",
     version="0.1.0",
     description="Predicts merge-conflict risk and proposes reviewable merge resolutions.",
 )

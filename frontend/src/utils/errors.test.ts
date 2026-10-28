@@ -4,7 +4,7 @@ import { describeError, API_DEMO_REPO_COMMAND, BACKEND_START_COMMAND, DEMO_REPO_
 describe('describeError', () => {
   it('turns a network failure into a start-the-backend fix', () => {
     const help = describeError('Failed to fetch', 'http://localhost:8000');
-    expect(help.title).toBe("Can't reach the MergeGuard backend");
+    expect(help.title).toBe("Can't reach the PRshik backend");
     expect(help.body).toBe('Nothing answered at http://localhost:8000.');
     expect(help.fix?.command).toBe(BACKEND_START_COMMAND);
   });
