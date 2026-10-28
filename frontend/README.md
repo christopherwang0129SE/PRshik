@@ -1,6 +1,6 @@
-# MergeGuard Dashboard (Frontend)
+# PRshik Dashboard (Frontend)
 
-This is the frontend for the MergeGuard dashboard MVP (T1). It provides a UI to visualize branch risk lights, pair risks, and agent status.
+This is the frontend for the PRshik dashboard MVP (T1). It provides a UI to visualize branch risk lights, pair risks, and agent status.
 
 ## Getting Started
 
@@ -8,7 +8,7 @@ This is the frontend for the MergeGuard dashboard MVP (T1). It provides a UI to 
 
 - Node.js 22 recommended (Vite 8's toolchain expects a current Node 20.19+ or Node 22; Node 18 is too old)
 - npm (comes with Node.js)
-- The MergeGuard backend running (see below)
+- The PRshik backend running (see below)
 
 ### Installation
 

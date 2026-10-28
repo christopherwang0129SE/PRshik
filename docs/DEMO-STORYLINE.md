@@ -1,4 +1,4 @@
-# Three-minute MergeGuard demo
+# Three-minute PRshik demo
 
 The default dashboard is the checkout story. Use `?advanced=1` for repository setup, the alternate API demo and per-pair model accounting. No API keys are required for the default story: git inspection and each branch's own tests still run. Nemotron intent-test generation and Tavily enrichment need their configured keys; never narrate those as active when the header or pipeline says they were skipped.
 

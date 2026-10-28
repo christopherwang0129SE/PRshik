@@ -3,10 +3,10 @@
 Real semantic merge conflicts from public repos: two pull requests that each
 passed CI, merged with **no textual conflict**, and broke `main` together. Each
 case is pinned to exact SHAs and replayable with one command; every number
-below comes from fresh MergeGuard runs (no cache) on 2026-10-08 with
+below comes from fresh PRshik runs (no cache) on 2026-10-08 with
 `nvidia/nemotron-3-super-120b-a12b` on Nebius.
 
-**Admission rule:** a case is listed here only if MergeGuard's default pipeline
+**Admission rule:** a case is listed here only if PRshik's default pipeline
 returned **confirmed** for the PR pair. Two layers can confirm, and every case
 says which one did:
 
@@ -17,7 +17,7 @@ says which one did:
 - **Intent test** (Nemotron): a test Nemotron generated for a high-risk pair
   passes on its own branch, fails on the merge-base and fails on the merge.
 
-Cases we reproduced but MergeGuard did not confirm are listed under
+Cases we reproduced but PRshik did not confirm are listed under
 [Investigated, not confirmed](#investigated-not-confirmed).
 
 ## Results (current pipeline, 3 fresh runs each)
@@ -75,7 +75,7 @@ estimate ($0.30 / $0.90 per 1M input/output tokens). Re-run the measurements wit
 > extended PurgePreview with slack_user_tokens and slack_turn_contexts;
 > neither branch's CI saw the other.
 
-**MergeGuard now: confirmed 3/3, by both layers.**
+**PRshik now: confirmed 3/3, by both layers.**
 
 - Branch test (3/3): #17's own `test_branding.py` passes on #17 and fails on
   the merge: `TestPrivacyMainContainer::test_set_name_changes_text` and
@@ -138,7 +138,7 @@ failures have nothing to do with the conflict:
 - `test_kiss_ratchet_discrimination` fails identically on base, A and B on
   macOS but passes on Linux.
 
-**MergeGuard now: confirmed 3/3, by the branch test.**
+**PRshik now: confirmed 3/3, by the branch test.**
 
 - Branch test (3/3): #311's own
   `tools/test_kiss_proven_marker.py::test_live_markers_are_all_valid_and_match_the_floor`
@@ -192,7 +192,7 @@ clean; A+B fails that test; the fix passes. The fix commit says:
 > branch was cut before #381 merged [...] Merging #383 on top of #381 combined
 > a passing test with a changed shape, which neither PR's CI could see.
 
-**MergeGuard now: confirmed 3/3, by the branch test only.**
+**PRshik now: confirmed 3/3, by the branch test only.**
 
 - Branch test (3/3): #383's own
   `SummaryPanelBranchTests::test_bargauge_reduces_over_the_collapsed_total`
@@ -229,7 +229,7 @@ test fails on A+B. The fix adds `historyReplay: 'response'` to the test.
 Replay (Linux): `bridge.test.ts` has 544 / 557 / 553 passing tests on base /
 #8947 / #8933; A+B fails that test; the fix passes all 566.
 
-**MergeGuard now: confirmed 3/3, by the branch test only.**
+**PRshik now: confirmed 3/3, by the branch test only.**
 
 - Branch test (3/3): `bridge.test.ts` (changed by both PRs)
   `createAcpSessionBridge > transport failure marks the channel dying before
@@ -273,7 +273,7 @@ Replay (Linux): `bridge.test.ts` has 544 / 557 / 553 passing tests on base /
 | headroomlabs-ai/headroom #2306 | No | Its "semantic merge conflict" was a later PR (#2198) breaking an assertion from a much older PR (#1433), not two concurrent PRs. |
 | skornehl/ha-google-photos-backup (fix `c81ce810`) | No | The only failure was a ruff F821 lint error; no test fails. |
 
-## What these replays taught us about MergeGuard
+## What these replays taught us about PRshik
 
 - **Triage was the bottleneck; the branches' own tests remove it.** In all
   three Python cases the PR that was broken by the merge shipped a test that

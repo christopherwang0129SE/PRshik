@@ -1,4 +1,4 @@
-# MergeGuard demo repos
+# PRshik demo repos
 
 Two tiny git repositories, each with a **semantic merge conflict that git cannot see**.
 They are generated locally and git-ignored. The dashboard offers one button each.
