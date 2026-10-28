@@ -3,6 +3,7 @@ import type { AnalyzeResponse } from '../types';
 import { formatCost } from '../utils/usage';
 import { summaryLine, verdictFor, rankPairs, pairVerdict, mergesCleanly } from '../utils/verdict';
 import { usableDocs } from '../utils/docs';
+import { pairProof } from '../utils/proof';
 
 interface RunSummaryProps {
   response: AnalyzeResponse;
@@ -25,6 +26,16 @@ export const RunSummary = ({ response, target, headingRef, modelOk = false }: Ru
   const model = response.risk_model ?? usage?.model;
   const why = top && reading ? `${top.branch_a} and ${top.branch_b} ${mergesCleanly(top) && (top.branch_tests?.merge_conflict === false || top.verification?.merge_conflict === false) ? 'merge without a git conflict' : 'are merged'} — but ${joinedReading}` : verdict.detail;
   const docs = usableDocs(pairs.flatMap((p) => [...(p.docs_sources ?? []), ...(p.verification?.docs_sources ?? [])]));
+  // Only generated verification evidence belongs in this Nemotron proof strip.
+  const proof = top?.verification ? pairProof(top) : null;
+  // A passing merge is not proof, so the strip only appears when the merge run failed.
+  const proofStates = proof
+    ? (['a', 'b', 'merge', 'base'] as const).flatMap((target) => {
+        const result = proof.outcomes[target];
+        return result ? [[target, result] as const] : [];
+      })
+    : [];
+  const showProof = proof?.outcomes.merge === 'fail';
   const figures: Array<[string, string]> = [];
   figures.push(['Branches', `${response.branches.length} vs ${response.base_branch}`]);
   if (usage) {
@@ -47,6 +58,35 @@ export const RunSummary = ({ response, target, headingRef, modelOk = false }: Ru
       </h1>
       <p className="summary-detail">{why}</p>
       {modelOk && model ? <p className="model-attribution sponsor-chip">Scoring & intent tests: Nemotron · Nebius Token Factory</p> : !modelOk && <p className="model-attribution">Scores come from git + branch tests.</p>}
+      {showProof && proof && (
+        <div className="summary-proof" role="group" aria-labelledby="summary-proof-label">
+          <p className="summary-proof-label" id="summary-proof-label">
+            Proof: Nemotron’s intent test on {proofStates.length} {proofStates.length === 1 ? 'state' : 'states'}
+          </p>
+          <ul className="summary-proof-badges">
+            {proofStates.map(([target, result]) => {
+              const expected = target === 'base' && proof.baseExpected;
+              return (
+                <li
+                  key={target}
+                  className="summary-proof-badge"
+                  data-outcome={result}
+                  data-expected={expected ? 'true' : undefined}
+                >
+                  <span>{{ a: 'A only', b: 'B only', merge: 'A+B merge', base: 'merge-base' }[target]}</span>
+                  <strong>{result === 'fail' ? 'FAIL' : 'PASS'}</strong>
+                  {expected && <span>(expected)</span>}
+                </li>
+              );
+            })}
+          </ul>
+          {proof.comparison && (
+            <p className="summary-proof-money">
+              Merged code returns {proof.comparison.actual} — expected {proof.comparison.expected}.
+            </p>
+          )}
+        </div>
+      )}
       <dl className="figures" data-testid="run-figures">
         {figures.map(([label, value]) => (
           <div key={label}>

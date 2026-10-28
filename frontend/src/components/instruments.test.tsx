@@ -71,7 +71,7 @@ const PAIR: PairRisk = {
 describe('RiskGauge', () => {
   it('omits missing score sources and keeps a real zero', () => {
     render(<RiskGauge pair={{ ...PAIR, git_score: null, model_score: 0 }} />);
-    expect(screen.getByText('Nemotron 0')).toBeInTheDocument();
+    expect(screen.getByText('Signals: Nemotron 0')).toBeInTheDocument();
     expect(screen.queryByText(/git heuristic/)).not.toBeInTheDocument();
   });
   it('keeps a pending low score neutral until checks finish', () => {
@@ -80,16 +80,19 @@ describe('RiskGauge', () => {
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'pending');
     expect(screen.getByText('/ 100 · provisional')).toBeInTheDocument();
     expect(screen.getByText('10 provisional')).toBeInTheDocument();
-    expect(screen.getByText('git heuristic 10')).toBeInTheDocument();
+    expect(screen.getByText('Signals: git heuristic 10')).toBeInTheDocument();
     expect(screen.queryByText('Low risk')).not.toBeInTheDocument();
     rerender(<RiskGauge pair={pair} />);
     expect(screen.getByTestId('risk-gauge')).toHaveAttribute('data-level', 'low');
-    expect(screen.getByText('/ 100 · low')).toBeInTheDocument();
+    expect(screen.getByText(/^\/ 100 · low$/i)).toBeInTheDocument();
   });
   it('shows the score large, the level, and both sub-scores for screen readers', () => {
     render(<RiskGauge pair={PAIR} />);
     expect(screen.getByTestId('gauge-score')).toHaveTextContent('90');
-    expect(screen.getByText('/ 100 · high')).toBeInTheDocument();
+    expect(screen.getByText(/^\/ 100 · high$/i)).toBeInTheDocument();
+    // The level is said once, beside the number; the label only names the instrument.
+    expect(screen.getByText('Risk score')).toBeInTheDocument();
+    expect(screen.queryByText(/RISK SCORE — /)).not.toBeInTheDocument();
     expect(screen.getByText(/Risk score 90 out of 100/)).toHaveTextContent('git scored 10. Nemotron scored 78.');
   });
 
@@ -133,20 +136,17 @@ describe('Pipeline', () => {
     expect(screen.getByTestId('stage-verify')).toHaveTextContent(/runs it on A, B, base and the merge/);
   });
 
-  it('opens details on completion once per run and respects collapse', () => {
+  it('keeps run details collapsed after a run, with a summary from real timings', () => {
     const state = initialRun();
     const { rerender } = render(<Pipeline run={state} mode="live" />);
     const disclosure = screen.getByText('Run details').closest('details')!;
     expect(disclosure).not.toHaveAttribute('open');
     rerender(<Pipeline run={state} mode="finished" model="api-model-id" />);
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(disclosure.querySelector('summary')).toHaveTextContent(/\d+ stages/);
+    fireEvent.click(screen.getByText('Run details'));
     expect(disclosure).toHaveAttribute('open');
     expect(screen.getByText('Model: api-model-id')).toBeVisible();
-    fireEvent.click(screen.getByText('Run details'));
-    rerender(<Pipeline run={{ ...state }} mode="finished" />);
-    expect(disclosure).not.toHaveAttribute('open');
-    rerender(<Pipeline run={initialRun()} mode="live" />);
-    rerender(<Pipeline run={initialRun()} mode="finished" />);
-    expect(disclosure).toHaveAttribute('open');
   });
 
   it('lights stages from stream events, ticks the clock and cancels', () => {

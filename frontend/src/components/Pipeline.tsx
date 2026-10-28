@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment } from 'react';
 import type { RunState, StageProgress } from '../utils/run';
-import { formatClock, formatDuration, skippedModelDetail, stagesFor } from '../utils/run';
+import { activeStage, formatClock, formatDuration, skippedModelDetail, stagesFor } from '../utils/run';
 
 export type PipelineMode = 'idle' | 'live' | 'blind' | 'finished';
 
@@ -34,21 +34,35 @@ const stateText = (stage: StageProgress, mode: PipelineMode): string => {
   }
 };
 
+const durationOf = (stage: StageProgress): number | null => {
+  if (stage.startedAt === undefined || stage.endedAt === undefined) return null;
+  return Math.max(0, stage.endedAt - stage.startedAt);
+};
+
 /**
  * The analysis pipeline as a row of stages that light up as the stream
  * reports them. Before a run it doubles as the explanation of what will
  * happen; after a run it keeps the time each stage took.
  */
 export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, model }: PipelineProps) => {
-  const disclosure = useRef<HTMLDetailsElement>(null);
-  const previousMode = useRef<PipelineMode>('idle');
-  useEffect(() => {
-    if (mode === 'finished' && previousMode.current !== 'finished' && disclosure.current) disclosure.current.open = true;
-    previousMode.current = mode;
-  }, [mode]);
   const running = mode === 'live' || mode === 'blind';
   const stages = stagesFor(gitOnly);
   const gitScored = run.pairs.some(p => p.git_score != null);
+  const modelPairs = run.pairs.filter(p => p.model_score != null || p.score_source === 'model');
+  const modelCached = modelPairs.length > 0 && modelPairs.every(p => p.model_cached === true);
+  const timingSummary = (['model', 'verify'] as const).map((id) => {
+    const def = stages.find(stage => stage.id === id);
+    const duration = durationOf(run.stages[id]);
+    if (!def || duration === null) return null;
+    return `${def.title} ${formatDuration(duration)}${id === 'model' && modelCached ? ' (cached)' : ''}`;
+  }).filter((part): part is string => part !== null);
+  const historySummary = [
+    `${stages.length} stages`,
+    ...(elapsedS > 0 ? [formatDuration(elapsedS)] : []),
+    ...timingSummary,
+  ].join(' · ');
+  const currentStage = mode === 'live' ? activeStage(run) : undefined;
+  const currentStageDetail = currentStage ? run.stages[currentStage.id].detail : null;
   const renderStages = (compact: boolean) => (
     <ol className={compact ? "run-stepper" : "stages"} aria-label={compact ? "Run stages" : undefined}>
         {stages.map((def) => {
@@ -62,6 +76,8 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, m
             gitOnly && state === 'skipped' && (def.id === 'model' || def.id === 'verify')
               ? skippedModelDetail(def.id, stage.detail)
               : stage.detail;
+          const duration = durationOf(stage);
+          const instant = state === 'done' && duration !== null && formatDuration(duration) === '0.0s';
           return (
             <Fragment key={def.id}>
             {mode === 'idle' && def.id === 'model' && <li className="stage" data-state={gitScored ? 'done' : 'idle'} data-testid={compact ? undefined : "stage-git"}>
@@ -70,7 +86,7 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, m
               {gitScored && <span className="stage-state">done</span>}
               {mode === 'idle' && <span className="stage-about">Scores git hunk overlap for every pair.</span>}
             </li>}
-            <li className="stage" data-state={state} data-testid={compact ? undefined : `stage-${def.id}`}>
+            <li className="stage" data-state={state} data-instant={instant ? 'true' : undefined} data-testid={compact ? undefined : `stage-${def.id}`}>
               <span className="stage-bar" aria-hidden="true"></span>
               <span className="stage-title">{def.title}</span>
               {text && <span className="stage-state tabular">{text}</span>}
@@ -122,9 +138,16 @@ export const Pipeline = ({ run, mode, elapsedS = 0, onCancel, gitOnly = false, m
           </div>
         )}
         {renderStages(true)}
+        {currentStage && (
+          // App's status region already announces each stage; this note stays visual.
+          <p className="pipeline-live-note">
+            <strong>{currentStage.title} is running…</strong>{' '}
+            {currentStageDetail || currentStage.about}
+          </p>
+        )}
       </section>}
-      <details className="pipeline-history" ref={disclosure}>
-        <summary>Run details <span>Pipeline stages and timings</span></summary>
+      <details className="pipeline-history">
+        <summary>Run details <span>{historySummary}</span></summary>
         {model && <p className="run-model mono">Model: {model}</p>}
         {content}
       </details>
