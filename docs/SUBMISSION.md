@@ -144,17 +144,22 @@ https://www.youtube.com/watch?v=NsdlcErTttc
 
 ## Describe your contribution (Christopher Wang)
 
-Led project initiation and development: built the Sentinel merge-conflict predictor, GitHub integration with review queue (using the GitHub REST API and webhooks), and Planner agent for safe merge ordering; reviewed and merged teammates' contributions, implemented the Resolver agent and benchmark, led the PRshik rebranding, and authored core documentation and submission materials.
+Led project initiation and development: built the first version of the Sentinel merge-conflict predictor, the GitHub integration with its review queue (using the GitHub REST API), and the Planner agent for safe merge ordering; reviewed and merged teammates' contributions, including the Resolver agent (Subramanya Bhat) and the real-repo benchmark (lamapony); led the PRshik rebranding; and authored core documentation and submission materials.
+
 I built the GitHub integration, which syncs pull requests and powers a review queue showing which
 PRs need a reviewer, are waiting on review, or are approved. I also built the
-Planner agent, which uses a graph-based algorithm to group branches into independent "safe zones" (connected components with no medium- or high-risk pair between them) and applies a risk-prioritized topological sort to suggest a merge order. As the repo owner, I reviewed and merged my teammates' work, including
+Planner agent, which uses union-find to group branches into independent "safe zones" (connected components with no medium- or high-risk pair between them) and orders merges riskiest-first. As the repo owner, I reviewed and merged my teammates' work, including
 the Resolver agent and the real-repo benchmark. I also led the rename to PRshik,
 motivated by the need for a unique and memorable project identity that would not conflict with existing tools or trademarks; this involved researching available names, updating documentation, and coordinating changes across the codebase and submission materials. I also wrote the README and the Devpost submission. Working on a tool that detects
 branch conflicts, while three of us were merging branches in parallel, made the
 problem very real to me.
 Experiencing parallel merges firsthand underscored the importance of automated conflict detection.
-fact or an opinion only the team can give; replace or delete them before
-pasting.
+
+## Status
+
+Submitted on Devpost as a team.
+
+## Application form answers (mandatory questions)
 
 ### Which model(s) did you use, and why did you choose that size/variant?
 
