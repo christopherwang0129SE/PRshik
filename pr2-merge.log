@@ -1,0 +1,16 @@
+I'll resolve the mid-merge so both PR #1 sync and the Nemotron verify work stay intact, then run the tests and commit without pushing.The three conflicts are a union problem: GitHub PR sync from main and the Nemotron verify surface from PR #2. I'll read both sides before combining them.The GitHub endpoint already calls `sentinel.analyze` with defaults that skip verify on URL clones. I'll union the imports, schemas, and README, then run the suites.Backend deps are in. Frontend install ran from the repo root, so I'll install inside `frontend/` and start the backend tests.The merge is committed on `pr2` as `95d975b` (`fa9c9f3` + `c3e5d9e`). It was not pushed.
+
+**Conflict decisions**
+
+- `backend/app/api/routes.py`: one import set (`AnalyzeRequest`, `AnalyzeResponse`, `GitHubPullRequestSyncResponse`, plus `git_service`, `github_service`, `sentinel`, `verifier`). `POST /api/analyze` still passes `use_cache`, `verify`, and `verify_allowed` (local allowed repos only). `GET /api/github/pull-requests` is unchanged and calls `sentinel.analyze` with the defaults, so verify stays off for the workspace clone. Routes are `GET /health`, `POST /analyze`, and `GET /github/pull-requests`.
+- `backend/app/schemas.py`: `AnalyzeResponse` keeps `risk_model` and `usage`. `GitHubPullRequest` and `GitHubPullRequestSyncResponse` follow that class, so the nested analysis includes those fields.
+- `README.md`: the Nemotron, cost pipeline, branch tests, verify-by-test, and MCP sections stay. The GitHub pull-request sync section is before Tests, and the layout lists `github_service.py` and `GET /api/github/pull-requests`. The sync section notes that scoring matches `/api/analyze` and that intent tests and branch tests stay off for those URL clones.
+
+**Extra fix:** `test_github_service.py` inits the bare remote with `git init --bare -b main`. Without that, this machine's default branch is `master`, the clone has no local `main`, and `diff_against_base` cannot resolve `main..mergeguard/pr/7`.
+
+**Tests**
+
+- Backend: `121 passed, 1 skipped` in 88s (`pytest` exit 0). The skip is `tests/test_mcp_server.py` (`mcp` is not installed in the FastAPI venv). One Starlette/anyio deprecation warning in `test_api_returns_usage`.
+- Frontend: Node 20 cannot load jsdom 30. On Node v22.22.2, vitest reported `11` files, `110` tests passed, and `tsc -b && vite build` succeeded.
+
+MERGEDONE
