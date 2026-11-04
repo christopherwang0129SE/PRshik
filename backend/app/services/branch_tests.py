@@ -471,7 +471,9 @@ def check_pair(repo: Path, base: str, branch_a: str, branch_b: str) -> BranchTes
         return finish("error", f"branch tests could not run: {problems[0]}"[:300] + note,
                       runs=runs, **info)
     if not passed_own:
-        return finish("passed", "no branch test passed on its own branch, nothing to compare"
+        # Every changed test already fails on its own branch, so a failure on the
+        # merge proves nothing. That is not evidence the merge is fine.
+        return finish("skipped", "no branch test passed on its own branch, nothing to compare"
                       + note, runs=runs, **info)
     return finish(
         "passed",

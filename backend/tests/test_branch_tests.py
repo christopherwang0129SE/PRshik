@@ -97,6 +97,9 @@ def brepo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                                  "test_value.py": "import config\n\n\ndef test_value():\n    # fixed by BASE=2\n    assert config.VALUE == 2\n"},
             "base two")
     _branch(r, "feat/delta", {"b_part.py": "DELTA = -1\n"}, "delta")
+    # Broken on its own branch: nothing to compare with the merge.
+    _branch(r, "feat/broken-test", {"test_broken.py": "def test_broken():\n    assert 1 == 2\n"},
+            "broken test")
     # Rename vs a new importer: the merge fails to import the new test module.
     _branch(r, "feat/rename", {"store.py": None, "storage.py": STORE,
                                "test_store.py": TEST_STORE.replace("import store", "import storage as store")},
@@ -137,6 +140,16 @@ def test_test_already_failing_on_the_merge_base_does_not_confirm(brepo: Path) ->
     merge = next(r for r in res.runs if r.target == "merge")
     assert merge.failed == 1  # it does fail on the merge ...
     assert res.status == "passed" and res.confirming == []  # ... but also on main
+
+
+def test_no_test_passing_on_its_own_branch_is_skipped_not_passed(brepo: Path) -> None:
+    """A test that already fails on its own branch proves nothing about the merge (#25)."""
+    res = branch_tests.check_pair(brepo, "main", "feat/broken-test", "feat/delta")
+    assert res.status == "skipped", res.reason
+    assert "nothing to compare" in res.reason
+    assert res.confirming == []
+    assert [r.target for r in res.runs] == ["a", "merge"]  # B changed no test file
+    assert res.runs[0].failed == 1  # it did run, and failed, on its own branch
 
 
 def test_module_that_no_longer_imports_on_the_merge_is_confirmed(brepo: Path) -> None:
