@@ -149,8 +149,9 @@ class BranchTests(BaseModel):
 
     ``confirmed``: at least one of those tests passes on its branch, fails on
     the merge (twice) and does not already fail on the merge-base.
-    ``passed``: ran, no such test. ``skipped``: no test files changed, or a
-    textual merge conflict. ``unsupported``: only test files we cannot run
+    ``passed``: ran, no such test. ``skipped``: nothing could be compared: no
+    test files changed, a textual merge conflict, or no changed test passes on
+    its own branch. ``unsupported``: only test files we cannot run
     (JS/TS without a vitest/jest setup or a node binary). ``error``: could not
     run (see reason).
     """
