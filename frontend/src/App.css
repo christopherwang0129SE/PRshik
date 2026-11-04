@@ -2414,3 +2414,29 @@
     white-space: normal;
   }
 }
+
+/* #22: on phones the result panel's secondary text had drifted to 10-12px.
+   Lift it back to the scale's floor (--t-xs, 13px) so the proof, notes and
+   stage states stay readable at 390px. Colours already meet 4.5:1. */
+@media (max-width: 640px) {
+  .gauge-note,
+  .gauge-label,
+  .gauge-legend span,
+  .proof-caption,
+  .explain-aside,
+  .cache-caption,
+  .proof-matrix dt,
+  .proof-matrix dd,
+  .proof-row-note,
+  .proof-comparison > div > span,
+  .summary-proof-label,
+  .summary .figures dt,
+  .git-clean-tag,
+  .run-model,
+  .detail[data-verdict='confirmed'] .verdict-word,
+  .pipeline-history .stage-state,
+  .run-stepper .stage-state,
+  .pipeline-history > summary span {
+    font-size: var(--t-xs);
+  }
+}
