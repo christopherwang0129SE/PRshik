@@ -5,7 +5,7 @@ export interface ErrorHelp {
   fix?: { text: string; command?: string };
 }
 
-export const BACKEND_START_COMMAND = 'cd backend && uvicorn app.main:app --port 8000';
+export const BACKEND_START_COMMAND = 'cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000';
 export const DEMO_REPO_COMMAND = 'python3 demo/make_demo_repo.py';
 export const API_DEMO_REPO_COMMAND = 'python3 demo/make_api_demo_repo.py';
 
