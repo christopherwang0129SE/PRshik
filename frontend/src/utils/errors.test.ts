@@ -9,6 +9,11 @@ describe('describeError', () => {
     expect(help.fix?.command).toBe(BACKEND_START_COMMAND);
   });
 
+  it('starts the backend through its own virtualenv, so it works when uvicorn is not on PATH', () => {
+    // #19: `uvicorn` alone fails on a machine where only backend/.venv has it.
+    expect(BACKEND_START_COMMAND).toBe('cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000');
+  });
+
   it('suggests the demo repo for a path that is not a git repository', () => {
     const help = describeError('/tmp/x is not a git repository', 'http://localhost:8000');
     expect(help.title).toBe("That path isn't a git repository");
