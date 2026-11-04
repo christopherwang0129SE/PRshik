@@ -102,6 +102,9 @@ def brepo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                                "test_store.py": TEST_STORE.replace("import store", "import storage as store")},
             "rename store -> storage")
     _branch(r, "feat/ts", {"web/app.test.ts": "test('x', () => {});\n"}, "ts test")
+    # A test that fails on its own branch: nothing passes, so there is nothing to compare.
+    _branch(r, "feat/broken-test", {"test_broken.py": "def test_broken():\n    assert 1 == 2\n"},
+            "broken test")
     _branch(r, "docs/readme", {"README.md": "# floor\n\nDocs.\n"}, "docs")
     monkeypatch.setattr(settings, "verify_allowed_roots", str(tmp_path / "allowed"))
     return r
@@ -154,6 +157,18 @@ def test_js_tests_without_a_runner_are_unsupported_and_no_tests_is_skipped(brepo
     assert res.runs == []
     res = branch_tests.check_pair(brepo, "main", "feat/delta", "docs/readme")
     assert res.status == "skipped"
+
+
+def test_no_test_passing_on_its_own_branch_is_not_reported_as_passed(brepo: Path) -> None:
+    # #25: the only branch test fails on its own branch, so no comparison with the merge
+    # is possible. That is inconclusive, not a pass.
+    res = branch_tests.check_pair(brepo, "main", "feat/broken-test", "docs/readme")
+    assert res.status == "skipped", res.reason
+    assert "nothing to compare" in res.reason
+    assert res.confirming == []
+    assert [r.target for r in res.runs] == ["a", "merge"]  # B has no test files to run
+    own = next(r for r in res.runs if r.target == "a")
+    assert own.failed == 1 and own.passed == 0
 
 
 def test_branch_test_reasons_pluralize_file_counts(
