@@ -224,6 +224,16 @@ describe('App', () => {
     expect(calls('/api/repositories')).toHaveLength(0);
   });
 
+  it('points to the API demo and tools next to the checkout demo in the default view', async () => {
+    // #21: the second case was only reachable through the footer's "More tools" link.
+    window.history.replaceState(null, '', '/');
+    render(<App />);
+    await screen.findByText('Engine online');
+    const link = screen.getByRole('link', { name: 'API demo (Tavily) and more tools' });
+    expect(link).toHaveAttribute('href', '/?advanced=1');
+    expect(screen.getByRole('group', { name: 'Bundled demos' })).toContainElement(link);
+  });
+
   it('hides arbitrary repository input and GitHub queue in advanced demo mode', async () => {
     route('/api/health', () => Promise.resolve(jsonResponse({ ...HEALTH, demo_mode: true })));
     route('/api/repositories', () => Promise.resolve(jsonResponse({ repositories: [] })));

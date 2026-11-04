@@ -431,6 +431,14 @@ function App() {
                   )}
                 </div>
               )}
+              {!advanced && API_DEMO_REPO_PATH && phase === 'idle' && (
+                <div className="demo">
+                  <p className="demo-note">
+                    Second case: a payments client on requests and pydantic.{' '}
+                    <a href="/?advanced=1">API demo (Tavily) and more tools</a>
+                  </p>
+                </div>
+              )}
               {advanced && API_DEMO_REPO_PATH && (
                 <div className="demo">
                   <button
